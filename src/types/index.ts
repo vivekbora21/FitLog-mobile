@@ -1,5 +1,5 @@
 // Re-export all domain models, contracts, and utilities from the shared package
-export * from '../../../packages/shared/src';
+export * from '../shared';
 
 // Mobile-specific navigation & UI types
 export interface AuthTokens {

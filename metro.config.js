@@ -1,19 +1,11 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 
-const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, '..');
+const config = getDefaultConfig(__dirname);
 
-const config = getDefaultConfig(projectRoot);
-
-// Watch the shared package directory outside of mobile/
-config.watchFolders = [
-  path.resolve(workspaceRoot, 'packages/shared'),
-];
-
-// Resolve @fitlog/shared directly to packages/shared/src
+// Shared types/utilities live inside the app so EAS Build uploads them
 config.resolver.extraNodeModules = {
-  '@fitlog/shared': path.resolve(workspaceRoot, 'packages/shared/src'),
+  '@fitlog/shared': path.resolve(__dirname, 'src/shared'),
 };
 
 // Enable wasm assets for expo-sqlite
