@@ -16,6 +16,7 @@ import {
   Plus,
   ChevronRight,
   CalendarDays,
+  Trophy,
 } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../../src/api/client';
 import {
@@ -171,13 +172,13 @@ export default function WorkoutsScreen() {
         </Animated.View>
         <Text style={styles.summaryCaption}>Last 7 days</Text>
 
-        {/* Plan */}
-        <Animated.View entering={enter(1)}>
+        {/* Plan & Progress links */}
+        <Animated.View entering={enter(1)} style={styles.linksRow}>
           <PressableScale
             haptic="selection"
             scaleTo={0.98}
             onPress={() => router.push('/plan')}
-            style={styles.planCard}
+            style={styles.planCardHalf}
             accessibilityLabel="Open workout plan"
           >
             <View style={[styles.summaryIcon, { backgroundColor: colors.primarySurface }]}>
@@ -187,13 +188,34 @@ export default function WorkoutsScreen() {
               <Text style={styles.planTitle} numberOfLines={1}>
                 {todayWorkout?.program?.name || 'Workout plan'}
               </Text>
-              <Text style={styles.planMeta}>
+              <Text style={styles.planMeta} numberOfLines={1}>
                 {todayWorkout?.program
-                  ? `${todayWorkout.program.mode_label} · Day ${todayWorkout.program.current_day} of ${todayWorkout.program.duration_days}`
-                  : 'No active plan — tap to choose one'}
+                  ? `Day ${todayWorkout.program.current_day}/${todayWorkout.program.duration_days}`
+                  : 'Choose plan'}
               </Text>
             </View>
-            <ChevronRight size={18} color={colors.textMuted} />
+            <ChevronRight size={16} color={colors.textMuted} />
+          </PressableScale>
+
+          <PressableScale
+            haptic="selection"
+            scaleTo={0.98}
+            onPress={() => router.push('/progress')}
+            style={styles.planCardHalf}
+            accessibilityLabel="Open progress & PRs"
+          >
+            <View style={[styles.summaryIcon, { backgroundColor: colors.amberGlow }]}>
+              <Trophy size={18} color={colors.warning} />
+            </View>
+            <View style={styles.planText}>
+              <Text style={styles.planTitle} numberOfLines={1}>
+                Progress
+              </Text>
+              <Text style={styles.planMeta} numberOfLines={1}>
+                PRs &amp; Trends
+              </Text>
+            </View>
+            <ChevronRight size={16} color={colors.textMuted} />
           </PressableScale>
         </Animated.View>
 
@@ -418,6 +440,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  linksRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  planCardHalf: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderGlow,
+    padding: spacing.md,
   },
   planCard: {
     flexDirection: 'row',

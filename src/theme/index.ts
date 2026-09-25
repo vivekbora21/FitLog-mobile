@@ -10,6 +10,7 @@ const lightColors = {
   surface: '#FFFFFF',
   surfaceElevated: '#F8FAFC',
   surfaceHover: '#EEF2F6',
+  surfaceHighlighted: '#F0FDFA',
   tabBar: 'rgba(255, 255, 255, 0.97)',
 
   // Borders
@@ -60,6 +61,7 @@ const darkColors: typeof lightColors = {
   surface: '#111827',
   surfaceElevated: '#1E293B',
   surfaceHover: '#283548',
+  surfaceHighlighted: '#0F2423',
   tabBar: 'rgba(17, 24, 39, 0.97)',
 
   border: '#1F2937',

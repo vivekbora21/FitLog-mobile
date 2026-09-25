@@ -17,6 +17,8 @@ import type {
   DailyLog,
   UserProfile,
   WeightEntry,
+  PersonalRecord,
+  BodyMeasurement,
   Exercise,
   RoutineExercise,
   JourneyMode,
@@ -342,8 +344,19 @@ class ApiClient {
 
   // Auth
   async login(email: string, password: string): Promise<{ access: string; refresh: string }> {
-    const data = await this.post<{ access: string; refresh: string }>('/auth/login/', { email, password });
+    const data = await this.post<{ access: string; refresh: string }>('/auth/login/', { email: email.trim(), password });
     await saveTokens(data.access, data.refresh);
+    return data;
+  }
+
+  async register(payload: { email: string; password: string; first_name: string; last_name: string }): Promise<{ user: any; tokens: { access: string; refresh: string } }> {
+    const data = await this.post<{ user: any; tokens: { access: string; refresh: string } }>('/auth/register/', {
+      ...payload,
+      email: payload.email.trim(),
+      first_name: payload.first_name.trim(),
+      last_name: payload.last_name.trim(),
+    });
+    await saveTokens(data.tokens.access, data.tokens.refresh);
     return data;
   }
 
@@ -546,6 +559,36 @@ class ApiClient {
 
   async updateWeight(id: string, weight_kg: number): Promise<WeightEntry> {
     return this.patch<WeightEntry>(`/progress/weight/${id}/`, { weight_kg });
+  }
+
+  async deleteWeight(id: string): Promise<void> {
+    await this.delete(`/progress/weight/${id}/`);
+  }
+
+  async getPersonalRecords(): Promise<PersonalRecord[]> {
+    return unwrapList(await this.get('/progress/prs/'));
+  }
+
+  async getBodyMeasurements(): Promise<BodyMeasurement[]> {
+    return unwrapList(await this.get('/progress/measurements/'));
+  }
+
+  async logBodyMeasurement(data: {
+    date: string;
+    waist_cm?: number | null;
+    chest_cm?: number | null;
+    hips_cm?: number | null;
+    arms_cm?: number | null;
+    thighs_cm?: number | null;
+    neck_cm?: number | null;
+    shoulders_cm?: number | null;
+    notes?: string;
+  }): Promise<BodyMeasurement> {
+    return this.post<BodyMeasurement>('/progress/measurements/', data);
+  }
+
+  async deleteBodyMeasurement(id: string): Promise<void> {
+    await this.delete(`/progress/measurements/${id}/`);
   }
 }
 

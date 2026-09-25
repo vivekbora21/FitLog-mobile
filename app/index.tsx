@@ -3,20 +3,32 @@ import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/providers/auth';
 import { colors } from '../src/theme';
+import { getFlag } from '../src/lib/secureStore';
+import { needsOnboarding, onboardingSkipKey } from '../src/lib/onboarding';
 
 export default function Index() {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     if (!isLoading) {
       if (isAuthenticated) {
-        router.replace('/(tabs)');
+        if (user && needsOnboarding(user.profile)) {
+          getFlag(onboardingSkipKey(user.id)).then((skipped) => {
+            if (!skipped) {
+              router.replace('/onboarding');
+            } else {
+              router.replace('/(tabs)');
+            }
+          });
+        } else {
+          router.replace('/(tabs)');
+        }
       } else {
         router.replace('/(auth)/login');
       }
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, user, router]);
 
   return (
     <View style={styles.container}>

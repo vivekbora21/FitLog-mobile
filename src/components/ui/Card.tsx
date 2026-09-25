@@ -65,6 +65,6 @@ const styles = StyleSheet.create({
   },
   cardHighlighted: {
     borderColor: colors.borderGlow,
-    backgroundColor: 'rgba(15, 118, 110, 0.08)',
+    backgroundColor: colors.surfaceHighlighted,
   },
 });

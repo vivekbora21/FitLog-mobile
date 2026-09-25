@@ -424,8 +424,19 @@ export default function DashboardScreen() {
 
         {/* Journey */}
         <Animated.View entering={enter(4)}>
-          <Text style={styles.sectionTitle}>Your journey</Text>
-          <Card elevated highlighted style={styles.journeyCard}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitleInline}>Your journey</Text>
+            <PressableScale haptic="selection" onPress={() => router.push('/progress')}>
+              <Text style={styles.sectionAction}>Analytics &amp; charts →</Text>
+            </PressableScale>
+          </View>
+          <Card
+            elevated
+            highlighted
+            style={styles.journeyCard}
+            onPress={() => router.push('/progress')}
+            accessibilityHint="Opens full progress and analytics"
+          >
             <View style={styles.badgeRow}>
               <Badge label={journey?.mode_label || pacing?.mode_label || 'Training'} tone="emerald" />
               {pacing?.pacing_status && pacing.pacing_status !== 'NO_PROGRAM' && (
@@ -475,6 +486,11 @@ export default function DashboardScreen() {
                 value={formatVolume(stats?.total_volume_kg_week)}
               />
             </View>
+
+            <View style={styles.journeyFooter}>
+              <Text style={styles.journeyFooterText}>View progress &amp; analytics</Text>
+              <ChevronRight size={14} color={colors.primaryLight} />
+            </View>
           </Card>
         </Animated.View>
 
@@ -483,7 +499,9 @@ export default function DashboardScreen() {
           <Animated.View entering={enter(5)}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitleInline}>Recent PRs</Text>
-              <Text style={styles.sectionMeta}>{stats?.workouts_this_month ?? 0} sessions this month</Text>
+              <PressableScale haptic="selection" onPress={() => router.push('/progress')}>
+                <Text style={styles.sectionAction}>All records →</Text>
+              </PressableScale>
             </View>
             <ScrollView
               horizontal
@@ -768,6 +786,11 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.sm,
   },
+  sectionAction: {
+    fontSize: 13,
+    color: colors.primaryLight,
+    fontWeight: '700',
+  },
   sectionTitleInline: {
     fontSize: 17,
     fontWeight: '800',
@@ -937,6 +960,20 @@ const styles = StyleSheet.create({
     width: 1,
     height: 28,
     backgroundColor: colors.border,
+  },
+  journeyFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  journeyFooterText: {
+    fontSize: 12,
+    color: colors.primaryLight,
+    fontWeight: '600',
   },
   prScrollOuter: {
     marginHorizontal: -spacing.lg,

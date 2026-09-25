@@ -174,6 +174,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 11,
     fontWeight: '600',
+    letterSpacing: -0.2,
   },
   labelFocused: {
     fontWeight: '800',

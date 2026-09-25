@@ -8,9 +8,6 @@ import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { reloadAppAsync } from 'expo';
 import {
   LogOut,
-  Shield,
-  Server,
-  HardDrive,
   Building2,
   Ruler,
   Scale,
@@ -23,9 +20,10 @@ import {
   Sun,
   Moon,
   Smartphone,
+  TrendingUp,
+  User as UserIcon,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
-import { api } from '../../src/api/client';
 import { checkDatabaseHealth } from '../../src/lib/db';
 import { Avatar, Badge, Button, PressableScale, ScreenHeader } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
@@ -132,6 +130,11 @@ export default function ProfileScreen() {
               value={profile?.height_cm ? `${profile.height_cm} cm` : '--'}
             />
             <ProfileStat
+              icon={<UserIcon size={16} color={colors.violet} />}
+              label="Sex"
+              value={profile?.sex ? humanize(profile.sex) : '--'}
+            />
+            <ProfileStat
               icon={<Activity size={16} color={colors.amber} />}
               label="Activity"
               value={humanize(profile?.activity_level) || 'Moderate'}
@@ -148,8 +151,16 @@ export default function ProfileScreen() {
               icon={<PencilLine size={18} color={colors.primaryLight} />}
               iconTint={colors.primarySurface}
               title="Edit profile"
-              subtitle="Name, weight, height, activity & goal"
+              subtitle="Name, sex, weight, height, activity & goal"
               onPress={() => router.push('/profile-edit')}
+              right={<ChevronRight size={18} color={colors.textMuted} />}
+            />
+            <SettingsRow
+              icon={<TrendingUp size={18} color={colors.primaryLight} />}
+              iconTint={colors.primarySurface}
+              title="Progress & analytics"
+              subtitle="Weight charts, PR records & measurements"
+              onPress={() => router.push('/progress')}
               right={<ChevronRight size={18} color={colors.textMuted} />}
             />
             <SettingsRow
@@ -229,7 +240,7 @@ export default function ProfileScreen() {
         </Animated.View>
 
         {/* System */}
-        <Animated.View entering={enter(2)}>
+        {/* <Animated.View entering={enter(2)}>
           <Text style={styles.groupLabel}>App & connection</Text>
           <View style={styles.group}>
             <SettingsRow
@@ -261,7 +272,7 @@ export default function ProfileScreen() {
               right={<StatusDot color={colors.success} label="Active" />}
             />
           </View>
-        </Animated.View>
+        </Animated.View> */}
 
         <Animated.View entering={enter(3)}>
           <Button

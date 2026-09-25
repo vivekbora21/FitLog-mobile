@@ -7,9 +7,10 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
+  register: (payload: { email: string; password: string; first_name: string; last_name: string }) => Promise<User>;
   logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: () => Promise<User | null>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -30,15 +31,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const userData = await api.getMe();
       setUser(userData);
+      return userData;
     } catch (error) {
       console.warn('Failed to refresh user data:', error);
+      return null;
     }
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string): Promise<User> => {
     await api.login(email.trim(), password);
     const userData = await api.getMe();
     setUser(userData);
+    return userData;
+  }, []);
+
+  const register = useCallback(async (payload: { email: string; password: string; first_name: string; last_name: string }): Promise<User> => {
+    await api.register(payload);
+    const userData = await api.getMe();
+    setUser(userData);
+    return userData;
   }, []);
 
   useEffect(() => {
@@ -72,6 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         login,
+        register,
         logout,
         refreshUser,
       }}

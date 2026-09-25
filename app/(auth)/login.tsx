@@ -38,10 +38,13 @@ import { api, extractErrorMessage } from '../../src/api/client';
 import { Button, Input, Card } from '../../src/components/ui';
 import { colors, radius, spacing } from '../../src/theme';
 import { haptics } from '../../src/lib/haptics';
+import { getFlag } from '../../src/lib/secureStore';
+import { needsOnboarding, onboardingSkipKey } from '../../src/lib/onboarding';
 
 const loginSchema = z.object({
   email: z
     .string()
+    .trim()
     .min(1, 'Email is required')
     .email('Please enter a valid email address'),
   password: z.string().min(1, 'Password is required'),
@@ -88,9 +91,14 @@ export default function LoginScreen() {
     setServerError(null);
     setIsSubmitting(true);
     try {
-      await login(data.email, data.password);
+      const loggedUser = await login(data.email, data.password);
       haptics.success();
-      router.replace('/(tabs)');
+      const skipped = await getFlag(onboardingSkipKey(loggedUser.id));
+      if (!skipped && needsOnboarding(loggedUser.profile)) {
+        router.replace('/onboarding');
+      } else {
+        router.replace('/(tabs)');
+      }
     } catch (err: any) {
       const msg = extractErrorMessage(err) || 'Invalid email or password.';
       setServerError(msg);
@@ -263,12 +271,25 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
+          {/* Sign Up Link */}
+          <View style={styles.footerRow}>
+            <Text style={styles.footerText}>Don&apos;t have an account? </Text>
+            <TouchableOpacity
+              onPress={() => {
+                haptics.selection();
+                router.push('/(auth)/signup' as any);
+              }}
+              hitSlop={8}
+            >
+              <Text style={styles.footerLink}>Sign Up</Text>
+            </TouchableOpacity>
+          </View>
         </Card>
         </Animated.View>
         </Animated.View>
 
         {/* Backend Server Configuration Toggle */}
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={styles.serverConfigToggle}
           onPress={() => setShowServerConfig(!showServerConfig)}
         >
@@ -276,7 +297,7 @@ export default function LoginScreen() {
           <Text style={styles.serverConfigToggleText}>
             Server URL: {api.getBaseUrl()}
           </Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         {showServerConfig && (
           <Card elevated style={styles.serverConfigCard}>
@@ -509,5 +530,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textSecondary,
     fontWeight: '600',
+  },
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  footerText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  footerLink: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primaryLight,
   },
 });

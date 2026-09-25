@@ -12,6 +12,12 @@ import { invalidateTrackingData } from '../src/lib/queries';
 import { haptics } from '../src/lib/haptics';
 
 type ActivityLevel = NonNullable<UserProfile['activity_level']>;
+type Sex = 'MALE' | 'FEMALE';
+
+const SEX_OPTIONS: { value: Sex; label: string }[] = [
+  { value: 'MALE', label: 'Male' },
+  { value: 'FEMALE', label: 'Female' },
+];
 
 const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string }[] = [
   { value: 'SEDENTARY', label: 'Sedentary' },
@@ -37,6 +43,7 @@ export default function EditProfileScreen() {
 
   const [firstName, setFirstName] = useState(user?.first_name ?? '');
   const [lastName, setLastName] = useState(user?.last_name ?? '');
+  const [sex, setSex] = useState<Sex | null>((profile?.sex as Sex) || null);
   const [weight, setWeight] = useState(profile?.weight_kg != null ? String(profile.weight_kg) : '');
   const [height, setHeight] = useState(profile?.height_cm != null ? String(profile.height_cm) : '');
   const [activity, setActivity] = useState<ActivityLevel>(profile?.activity_level ?? 'MODERATE');
@@ -50,6 +57,7 @@ export default function EditProfileScreen() {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         profile: {
+          sex: sex || undefined,
           weight_kg: weightVal,
           height_cm: heightVal,
           activity_level: activity,
@@ -90,6 +98,12 @@ export default function EditProfileScreen() {
         <Input label="First name" value={firstName} onChangeText={setFirstName} containerStyle={styles.half} />
         <Input label="Last name" value={lastName} onChangeText={setLastName} containerStyle={styles.half} />
       </View>
+      <ChipGroup
+        label="Biological sex (used for BMR & target calories)"
+        options={SEX_OPTIONS}
+        value={sex}
+        onChange={setSex}
+      />
       <View style={styles.row}>
         <Input
           label="Weight (kg)"

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Tabs, useRouter } from 'expo-router';
-import { LayoutDashboard, Dumbbell, Utensils, User } from 'lucide-react-native';
+import { LayoutDashboard, Dumbbell, Utensils, TrendingUp, User } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { TabBar } from '../../src/components/navigation/TabBar';
 import { colors } from '../../src/theme';
@@ -60,6 +60,15 @@ export default function TabLayout() {
           title: 'Nutrition',
           tabBarIcon: ({ color, size, focused }) => (
             <Utensils size={size} color={color} strokeWidth={focused ? 2.4 : 2} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="progress"
+        options={{
+          title: 'Progress',
+          tabBarIcon: ({ color, size, focused }) => (
+            <TrendingUp size={size} color={color} strokeWidth={focused ? 2.4 : 2} />
           ),
         }}
       />

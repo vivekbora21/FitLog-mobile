@@ -14,10 +14,12 @@ interface SheetScreenProps {
   footer?: React.ReactNode;
   /** Replaces the default close behaviour (router.back). */
   onClose?: () => void;
+  /** Optional custom right action element in header (e.g. Skip button). Defaults to close X. */
+  rightAction?: React.ReactNode;
 }
 
 /** Chrome for modal editing screens: title bar with close, keyboard-aware scroll body, sticky footer. */
-export function SheetScreen({ title, subtitle, children, footer, onClose }: SheetScreenProps) {
+export function SheetScreen({ title, subtitle, children, footer, onClose, rightAction }: SheetScreenProps) {
   const router = useRouter();
 
   return (
@@ -30,14 +32,18 @@ export function SheetScreen({ title, subtitle, children, footer, onClose }: Shee
             </Text>
             {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
           </View>
-          <PressableScale
-            haptic="selection"
-            onPress={onClose ?? (() => router.back())}
-            style={styles.closeBtn}
-            accessibilityLabel="Close"
-          >
-            <X size={20} color={colors.textPrimary} />
-          </PressableScale>
+          {rightAction !== undefined ? (
+            rightAction
+          ) : (
+            <PressableScale
+              haptic="selection"
+              onPress={onClose ?? (() => router.back())}
+              style={styles.closeBtn}
+              accessibilityLabel="Close"
+            >
+              <X size={20} color={colors.textPrimary} />
+            </PressableScale>
+          )}
         </View>
         <ScrollView
           contentContainerStyle={styles.body}
