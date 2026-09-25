@@ -7,12 +7,12 @@
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://fitlog-backend.onrender.com/api"
+        "EXPO_PUBLIC_API_URL": "https://fitlog-backend-ps99.onrender.com/api"
       }
     },
     "production": {
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://fitlog-backend.onrender.com/api"
+        "EXPO_PUBLIC_API_URL": "https://fitlog-backend-ps99.onrender.com/api"
       }
     }
   }
