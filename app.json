@@ -43,6 +43,12 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "owner": "vivekboras-team"
+    "owner": "vivekboras-team",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1f9ca39f-6139-4f5d-bbfc-139967541eb7"
+      }
+    }
   }
 }
