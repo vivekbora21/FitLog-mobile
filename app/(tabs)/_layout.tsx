@@ -1,19 +1,31 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Tabs, useRouter } from 'expo-router';
 import { LayoutDashboard, Dumbbell, Utensils, User } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { TabBar } from '../../src/components/navigation/TabBar';
 import { colors } from '../../src/theme';
+import { getFlag } from '../../src/lib/secureStore';
+import { needsOnboarding, onboardingSkipKey } from '../../src/lib/onboarding';
 
 export default function TabLayout() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
+  const promptedFor = useRef<string | number | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace('/(auth)/login');
     }
   }, [isLoading, isAuthenticated, router]);
+
+  // First run: ask for measurements and goals until they're filled in (or the user skips).
+  useEffect(() => {
+    if (!user || promptedFor.current === user.id || !needsOnboarding(user.profile)) return;
+    promptedFor.current = user.id;
+    getFlag(onboardingSkipKey(user.id)).then((skipped) => {
+      if (!skipped) router.push('/onboarding');
+    });
+  }, [user, router]);
 
   return (
     <Tabs

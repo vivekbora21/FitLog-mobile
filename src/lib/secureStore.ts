@@ -90,3 +90,27 @@ export async function clearTokens(): Promise<void> {
     console.error('Error clearing tokens from SecureStore:', error);
   }
 }
+
+// Small non-secret per-device flags (e.g. "onboarding skipped"). Web uses localStorage so it outlives the tab.
+export async function getFlag(key: string): Promise<boolean> {
+  try {
+    if (Platform.OS === 'web') {
+      return typeof window !== 'undefined' && window.localStorage?.getItem(key) === '1';
+    }
+    return (await SecureStore.getItemAsync(key)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function setFlag(key: string): Promise<void> {
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') window.localStorage?.setItem(key, '1');
+      return;
+    }
+    await SecureStore.setItemAsync(key, '1');
+  } catch (error) {
+    console.error('Error saving flag:', error);
+  }
+}

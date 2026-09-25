@@ -12,10 +12,12 @@ interface SheetScreenProps {
   children: React.ReactNode;
   /** Pinned below the scroll area, e.g. the primary save button. */
   footer?: React.ReactNode;
+  /** Replaces the default close behaviour (router.back). */
+  onClose?: () => void;
 }
 
 /** Chrome for modal editing screens: title bar with close, keyboard-aware scroll body, sticky footer. */
-export function SheetScreen({ title, subtitle, children, footer }: SheetScreenProps) {
+export function SheetScreen({ title, subtitle, children, footer, onClose }: SheetScreenProps) {
   const router = useRouter();
 
   return (
@@ -30,7 +32,7 @@ export function SheetScreen({ title, subtitle, children, footer }: SheetScreenPr
           </View>
           <PressableScale
             haptic="selection"
-            onPress={() => router.back()}
+            onPress={onClose ?? (() => router.back())}
             style={styles.closeBtn}
             accessibilityLabel="Close"
           >

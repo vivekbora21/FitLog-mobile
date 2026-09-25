@@ -37,6 +37,10 @@ export default function RootLayout() {
             <Stack.Screen name="workout/[id]" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="profile-edit" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
             <Stack.Screen name="plan" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen
+              name="onboarding"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom', gestureEnabled: false }}
+            />
             <Stack.Screen name="plan-select" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           </Stack>
         </AuthProvider>

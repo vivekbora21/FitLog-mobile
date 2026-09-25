@@ -5,6 +5,7 @@ import type {
   User,
   DashboardStats,
   TargetsPayload,
+  MacroTarget,
   NutritionDayResponse,
   JourneyPacingData,
   WorkoutSession,
@@ -423,6 +424,15 @@ class ApiClient {
     return this.get<TargetsPayload>('/nutrition/macro-targets/');
   }
 
+  async updateMacroTargets(payload: Partial<MacroTarget>): Promise<TargetsPayload> {
+    return this.put<TargetsPayload>('/nutrition/macro-targets/', payload);
+  }
+
+  // Recalculates calories/macros from the profile (BMR -> TDEE -> goal) and saves them.
+  async applyRecommendedTargets(): Promise<MacroTarget> {
+    return this.post<MacroTarget>('/nutrition/macro-targets/recommended/');
+  }
+
   async updateWater(dateStr: string, waterMl: number): Promise<NutritionDay> {
     return this.patch<NutritionDay>(`/nutrition/${dateStr}/`, { water_consumed_ml: Math.max(0, waterMl) });
   }
@@ -518,7 +528,9 @@ class ApiClient {
   async updateMe(payload: {
     first_name?: string;
     last_name?: string;
-    profile?: Partial<Pick<UserProfile, 'height_cm' | 'weight_kg' | 'activity_level' | 'fitness_goal'>>;
+    profile?: Partial<
+      Pick<UserProfile, 'height_cm' | 'weight_kg' | 'activity_level' | 'fitness_goal' | 'sex' | 'date_of_birth'>
+    >;
   }): Promise<User> {
     return this.patch<User>('/auth/me/', payload);
   }
