@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet, DimensionValue, ViewStyle } from 'react-native';
+import { View, DimensionValue, ViewStyle } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -7,7 +7,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles } from '../../theme';
 
 interface SkeletonProps {
   width?: DimensionValue;
@@ -17,6 +17,7 @@ interface SkeletonProps {
 }
 
 export function Skeleton({ width = '100%', height = 16, borderRadius = radius.md, style }: SkeletonProps) {
+  const styles = useStyles();
   const opacity = useSharedValue(0.45);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export function Skeleton({ width = '100%', height = 16, borderRadius = radius.md
 
 /** Generic placeholder layout for a tab screen while its first query loads. */
 export function ScreenSkeleton() {
+  const styles = useStyles();
   return (
     <View style={styles.screen} accessibilityLabel="Loading" accessibilityRole="progressbar">
       <Skeleton width="45%" height={14} />
@@ -53,7 +55,7 @@ export function ScreenSkeleton() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   block: {
     backgroundColor: colors.surfaceElevated,
   },
@@ -71,4 +73,4 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-});
+}));

@@ -2,13 +2,12 @@ import React from 'react';
 import {
   Text,
   ActivityIndicator,
-  StyleSheet,
   ViewStyle,
   TextStyle,
   PressableProps,
 } from 'react-native';
 import { PressableScale } from './PressableScale';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
 interface ButtonProps extends Omit<PressableProps, 'style' | 'children'> {
   title: string;
@@ -33,6 +32,8 @@ export function Button({
   textStyle,
   ...rest
 }: ButtonProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const getContainerStyle = (): ViewStyle[] => {
     const list: ViewStyle[] = [styles.base];
 
@@ -101,7 +102,7 @@ export function Button({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   base: {
     minHeight: 44,
     flexDirection: 'row',
@@ -182,4 +183,4 @@ const styles = StyleSheet.create({
   textDisabled: {
     color: colors.textMuted,
   },
-});
+}));

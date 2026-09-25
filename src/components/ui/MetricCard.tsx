@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, ViewStyle } from 'react-native';
+import { View, Text, ViewStyle } from 'react-native';
 import { ProgressBar } from './ProgressBar';
 import { PressableScale } from './PressableScale';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
 interface MetricCardProps {
   label: string;
@@ -27,13 +27,16 @@ export function MetricCard({
   target,
   percentage,
   icon,
-  accentColor = colors.primaryLight,
+  accentColor: accentColorProp,
   delay = 0,
   style,
   onPress,
   accessibilityHint,
   footer,
 }: MetricCardProps) {
+  const { colors } = useTheme();
+  const accentColor = accentColorProp ?? colors.primaryLight;
+  const styles = useStyles();
   const clampedPct = percentage !== undefined ? Math.min(100, Math.max(0, percentage)) : undefined;
 
   const a11yLabel = `${label}: ${value}${target ? ` of ${target}` : ''}${
@@ -99,7 +102,7 @@ export function MetricCard({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -159,4 +162,4 @@ const styles = StyleSheet.create({
     width: 32,
     textAlign: 'right',
   },
-});
+}));

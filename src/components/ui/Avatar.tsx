@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
-import { colors } from '../../theme';
+import { makeStyles } from '../../theme';
 import { getInitials } from '../../lib/format';
 
 interface AvatarProps {
@@ -12,6 +12,7 @@ interface AvatarProps {
 }
 
 export function Avatar({ name, imageUrl, size = 44, ring = false }: AvatarProps) {
+  const styles = useStyles();
   const inner = ring ? size - 6 : size;
 
   return (
@@ -38,7 +39,7 @@ export function Avatar({ name, imageUrl, size = 44, ring = false }: AvatarProps)
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   outer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -59,4 +60,4 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-});
+}));

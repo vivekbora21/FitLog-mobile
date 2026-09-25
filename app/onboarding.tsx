@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, Alert, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
@@ -18,7 +18,7 @@ import {
 } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
 import { Badge, Button, ChipGroup, Input, PressableScale, ProgressBar, SheetScreen } from '../src/components/ui';
-import { colors, radius, spacing } from '../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../src/theme';
 import type { JourneyMode, UserProfile } from '../src/types';
 import { parseNumberInput, toDateKey } from '../src/lib/format';
 import { useAuth } from '../src/providers/auth';
@@ -35,7 +35,8 @@ interface Blueprint {
   name: string;
   mode: JourneyMode;
   modeLabel: string;
-  color: string;
+  /** Palette key, resolved against the active theme when rendered. */
+  color: 'rose' | 'violet' | 'cyan' | 'amber';
   tone: 'rose' | 'violet' | 'cyan' | 'amber';
   Icon: typeof Flame;
   durationDays: number;
@@ -51,7 +52,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '60-Day Recomp & Shred',
     mode: 'CUT',
     modeLabel: 'Cut',
-    color: colors.rose,
+    color: 'rose',
     tone: 'rose',
     Icon: Flame,
     durationDays: 60,
@@ -65,7 +66,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '90-Day Mass Architecture',
     mode: 'BULK',
     modeLabel: 'Bulk',
-    color: colors.violet,
+    color: 'violet',
     tone: 'violet',
     Icon: Dumbbell,
     durationDays: 90,
@@ -79,7 +80,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '30-Day Strength Peak',
     mode: 'FOCUS',
     modeLabel: 'Focus',
-    color: colors.cyan,
+    color: 'cyan',
     tone: 'cyan',
     Icon: Target,
     durationDays: 30,
@@ -93,7 +94,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '21-Day Habit Lock-in',
     mode: 'HABIT',
     modeLabel: 'Habit',
-    color: colors.amber,
+    color: 'amber',
     tone: 'amber',
     Icon: Zap,
     durationDays: 21,
@@ -146,6 +147,8 @@ function dobFromAge(age: number, existing?: string | null): string {
 }
 
 export default function OnboardingScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, refreshUser } = useAuth();
@@ -493,9 +496,9 @@ export default function OnboardingScreen() {
                 {/* Header row with badges */}
                 <View style={styles.bpTopRow}>
                   <View style={styles.bpBadgeRow}>
-                    <View style={[styles.bpModeBadge, { backgroundColor: `${bp.color}22` }]}>
-                      <bp.Icon size={13} color={bp.color} />
-                      <Text style={[styles.bpModeText, { color: bp.color }]}>{bp.modeLabel}</Text>
+                    <View style={[styles.bpModeBadge, { backgroundColor: `${colors[bp.color]}22` }]}>
+                      <bp.Icon size={13} color={colors[bp.color]} />
+                      <Text style={[styles.bpModeText, { color: colors[bp.color] }]}>{bp.modeLabel}</Text>
                     </View>
                     <View style={styles.bpDurationBadge}>
                       <Clock size={12} color={colors.textMuted} />
@@ -568,7 +571,7 @@ export default function OnboardingScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   flex: {
     flex: 1,
   },
@@ -821,4 +824,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
     lineHeight: 16,
   },
-});
+}));

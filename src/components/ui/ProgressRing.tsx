@@ -1,5 +1,5 @@
 import React, { useEffect, useId } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import Animated, {
   Easing,
@@ -8,7 +8,7 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
-import { colors } from '../../theme';
+import { makeStyles, useTheme } from '../../theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -29,12 +29,16 @@ export function ProgressRing({
   percentage,
   size = 120,
   strokeWidth = 10,
-  color = colors.primaryLight,
+  color: colorProp,
   gradientTo,
-  trackColor = colors.track,
+  trackColor: trackColorProp,
   delay = 0,
   children,
 }: ProgressRingProps) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.primaryLight;
+  const trackColor = trackColorProp ?? colors.track;
+  const styles = useStyles();
   // useId() yields ":r0:"-style ids; SVG url(#…) references need plain characters.
   const gradientId = `ring${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const radius = (size - strokeWidth) / 2;
@@ -92,7 +96,7 @@ export function ProgressRing({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(() => ({
   svg: {
     transform: [{ rotate: '-90deg' }],
   },
@@ -105,4 +109,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-});
+}));

@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { PressableScale } from './PressableScale';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles } from '../../theme';
 
 interface ChipGroupProps<T extends string | number> {
   options: { value: T; label: string }[];
@@ -12,6 +12,7 @@ interface ChipGroupProps<T extends string | number> {
 
 /** Single-select row of pill buttons. */
 export function ChipGroup<T extends string | number>({ options, value, onChange, label }: ChipGroupProps<T>) {
+  const styles = useStyles();
   return (
     <View style={styles.container}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
@@ -37,7 +38,7 @@ export function ChipGroup<T extends string | number>({ options, value, onChange,
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   container: {
     marginBottom: spacing.lg,
   },
@@ -75,4 +76,4 @@ const styles = StyleSheet.create({
   chipTextSelected: {
     color: colors.primaryLight,
   },
-});
+}));

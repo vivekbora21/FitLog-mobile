@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -35,7 +34,7 @@ import {
 import { useAuth } from '../../src/providers/auth';
 import { extractErrorMessage } from '../../src/api/client';
 import { Button, Input, Card } from '../../src/components/ui';
-import { colors, radius, spacing } from '../../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { haptics } from '../../src/lib/haptics';
 
 const signupSchema = z
@@ -83,6 +82,8 @@ const signupSchema = z
 type SignupFormData = z.infer<typeof signupSchema>;
 
 export default function SignupScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const { register: registerUser } = useAuth();
 
@@ -396,7 +397,7 @@ export default function SignupScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -511,4 +512,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primaryLight,
   },
-});
+}));

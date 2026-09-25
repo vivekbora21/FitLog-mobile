@@ -1,11 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import React from 'react';
+import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
-import { reloadAppAsync } from 'expo';
 import {
   LogOut,
   Building2,
@@ -21,14 +20,14 @@ import {
   Moon,
   Smartphone,
   TrendingUp,
+  KeyRound,
+  Trash2,
   User as UserIcon,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
-import { checkDatabaseHealth } from '../../src/lib/db';
 import { Avatar, Badge, Button, PressableScale, ScreenHeader } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
-import { colors, radius, spacing, themePreference, type ThemePreference } from '../../src/theme';
-import { setThemePreference } from '../../src/theme/preference';
+import { radius, spacing, type ThemePreference, makeStyles, useTheme } from '../../src/theme';
 import { humanize } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
 
@@ -40,23 +39,18 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof Sun }
   { value: 'system', label: 'System', Icon: Smartphone },
 ];
 
-// Every screen's styles are built from the palette at startup, so a theme change reloads the app.
-function changeTheme(value: ThemePreference) {
-  if (value === themePreference) return;
-  haptics.selection();
-  setThemePreference(value);
-  reloadAppAsync('Theme changed').catch((err) => console.error('Failed to reload app:', err));
-}
-
 export default function ProfileScreen() {
+  const { colors, preference, setPreference } = useTheme();
+  const styles = useStyles();
   const { user, logout } = useAuth();
   const router = useRouter();
   const bottomClearance = useTabBarClearance();
-  const [dbReady, setDbReady] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    checkDatabaseHealth().then((ready) => setDbReady(ready));
-  }, []);
+  const changeTheme = (value: ThemePreference) => {
+    if (value === preference) return;
+    haptics.selection();
+    setPreference(value);
+  };
 
   const handleLogout = () => {
     haptics.warning();
@@ -216,11 +210,11 @@ export default function ProfileScreen() {
               icon={<Palette size={18} color={colors.primaryLight} />}
               iconTint={colors.primarySurface}
               title="Theme"
-              subtitle="Changing the theme restarts the app"
+              subtitle="Light, dark, or match your device"
             />
             <View style={styles.segment} accessibilityRole="radiogroup">
               {THEME_OPTIONS.map(({ value, label, Icon }) => {
-                const selected = value === themePreference;
+                const selected = value === preference;
                 return (
                   <PressableScale
                     key={value}
@@ -239,42 +233,31 @@ export default function ProfileScreen() {
           </View>
         </Animated.View>
 
-        {/* System */}
-        {/* <Animated.View entering={enter(2)}>
-          <Text style={styles.groupLabel}>App & connection</Text>
+
+        {/* Account */}
+        <Animated.View entering={enter(3)}>
+          <Text style={styles.groupLabel}>Account</Text>
           <View style={styles.group}>
             <SettingsRow
               first
-              icon={<Server size={18} color={colors.cyan} />}
+              icon={<KeyRound size={18} color={colors.cyan} />}
               iconTint={colors.cyanGlow}
-              title="Backend API"
-              subtitle={api.getBaseUrl()}
-              mono
-              right={<StatusDot color={colors.success} label="Connected" />}
+              title="Change password"
+              onPress={() => router.push('/account/password')}
+              right={<ChevronRight size={18} color={colors.textMuted} />}
             />
             <SettingsRow
-              icon={<HardDrive size={18} color={colors.violet} />}
-              iconTint="rgba(124, 58, 237, 0.15)"
-              title="Offline database"
-              subtitle={dbReady === null ? 'Checking…' : dbReady ? 'Healthy' : 'Unavailable'}
-              right={
-                <StatusDot
-                  color={dbReady === null ? colors.warning : dbReady ? colors.success : colors.error}
-                  label={dbReady ? 'Ready' : 'Pending'}
-                />
-              }
-            />
-            <SettingsRow
-              icon={<Shield size={18} color={colors.primaryLight} />}
-              iconTint={colors.primarySurface}
-              title="Token security"
-              subtitle="Encrypted device keychain"
-              right={<StatusDot color={colors.success} label="Active" />}
+              icon={<Trash2 size={18} color={colors.error} />}
+              iconTint={colors.errorBackground}
+              title="Delete account"
+              subtitle="Permanently remove your account and data"
+              onPress={() => router.push('/account/delete')}
+              right={<ChevronRight size={18} color={colors.textMuted} />}
             />
           </View>
-        </Animated.View> */}
+        </Animated.View>
 
-        <Animated.View entering={enter(3)}>
+        <Animated.View entering={enter(4)}>
           <Button
             title="Log Out"
             variant="secondary"
@@ -293,6 +276,7 @@ export default function ProfileScreen() {
 }
 
 function ProfileStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.stat} accessible accessibilityLabel={`${label}: ${value}`}>
       {icon}
@@ -304,15 +288,6 @@ function ProfileStat({ icon, label, value }: { icon: React.ReactNode; label: str
   );
 }
 
-function StatusDot({ color, label }: { color: string; label: string }) {
-  return (
-    <View style={styles.statusDotRow}>
-      <View style={[styles.statusDot, { backgroundColor: color }]} />
-      <Text style={styles.statusDotText}>{label}</Text>
-    </View>
-  );
-}
-
 interface SettingsRowProps {
   icon: React.ReactNode;
   iconTint: string;
@@ -320,18 +295,18 @@ interface SettingsRowProps {
   subtitle?: string;
   right?: React.ReactNode;
   first?: boolean;
-  mono?: boolean;
   onPress?: () => void;
 }
 
-function SettingsRow({ icon, iconTint, title, subtitle, right, first, mono, onPress }: SettingsRowProps) {
+function SettingsRow({ icon, iconTint, title, subtitle, right, first, onPress }: SettingsRowProps) {
+  const styles = useStyles();
   const content = (
     <>
       <View style={[styles.rowIcon, { backgroundColor: iconTint }]}>{icon}</View>
       <View style={styles.rowText}>
         <Text style={styles.rowTitle}>{title}</Text>
         {subtitle ? (
-          <Text style={[styles.rowSubtitle, mono && styles.mono]} numberOfLines={1}>
+          <Text style={styles.rowSubtitle} numberOfLines={1}>
             {subtitle}
           </Text>
         ) : null}
@@ -357,7 +332,7 @@ function SettingsRow({ icon, iconTint, title, subtitle, right, first, mono, onPr
   return <View style={[styles.row, !first && styles.rowBorder]}>{content}</View>;
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   editBtn: {
     width: 44,
     height: 44,
@@ -484,10 +459,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
-  mono: {
-    fontFamily: 'monospace',
-    fontSize: 11,
-  },
   segment: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -518,21 +489,6 @@ const styles = StyleSheet.create({
   segmentTextSelected: {
     color: colors.primaryLight,
   },
-  statusDotRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusDotText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
   logoutBtn: {
     marginTop: spacing.xl,
     borderColor: colors.errorBorder,
@@ -544,4 +500,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.md,
   },
-});
+}));

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Alert } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -17,31 +17,36 @@ import {
   ScreenHeader,
   ScreenSkeleton,
   Stepper,
+  useToast,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
-import { colors, radius, spacing } from '../../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { formatNumber, calculateMacroPercentage } from '../../src/types';
 import type { MealEntry, NutritionDayResponse } from '../../src/types';
 import { formatDayLabel, isValidDateKey, toDateKey } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 const MEAL_ORDER: MealEntry['meal_type'][] = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'];
 const CUP_ML = 250;
 
-const MEAL_META: Record<MealEntry['meal_type'], { label: string; icon: typeof Coffee; color: string }> = {
-  BREAKFAST: { label: 'Breakfast', icon: Coffee, color: colors.amber },
-  LUNCH: { label: 'Lunch', icon: Sun, color: colors.primaryLight },
-  DINNER: { label: 'Dinner', icon: Moon, color: colors.violet },
-  SNACK: { label: 'Snacks', icon: Cookie, color: colors.cyan },
+const MEAL_META: Record<MealEntry['meal_type'], { label: string; icon: typeof Coffee; color: 'amber' | 'primaryLight' | 'violet' | 'cyan' }> = {
+  BREAKFAST: { label: 'Breakfast', icon: Coffee, color: 'amber' },
+  LUNCH: { label: 'Lunch', icon: Sun, color: 'primaryLight' },
+  DINNER: { label: 'Dinner', icon: Moon, color: 'violet' },
+  SNACK: { label: 'Snacks', icon: Cookie, color: 'cyan' },
 };
 
 const enter = (i: number) => FadeInDown.delay(60 + i * 70).duration(420);
 
 export default function NutritionScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const bottomClearance = useTabBarClearance();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const params = useLocalSearchParams<{ date?: string }>();
   const [date, setDate] = useState(() => (isValidDateKey(params.date) ? params.date : toDateKey(new Date())));
 
@@ -88,13 +93,43 @@ export default function NutritionScreen() {
     onSettled: () => invalidateTrackingData(queryClient),
   });
 
+  // Delete right away (optimistically) and offer Undo, instead of a confirm dialog per entry.
   const deleteMutation = useMutation({
-    mutationFn: (mealId: string) => api.deleteMeal(mealId),
-    onSuccess: () => haptics.success(),
-    onError: (err) => {
+    mutationFn: (meal: MealEntry) => api.deleteMeal(meal.id),
+    onMutate: async (meal) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<NutritionDayResponse>(queryKey);
+      if (previous?.day) {
+        queryClient.setQueryData<NutritionDayResponse>(queryKey, {
+          ...previous,
+          day: { ...previous.day, meals: previous.day.meals.filter((m) => m.id !== meal.id) },
+        });
+      }
+      return { previous };
+    },
+    onSuccess: (_res, meal) => {
+      haptics.success();
+      toast({ message: `Deleted ${meal.name}`, actionLabel: 'Undo', onAction: () => restoreMutation.mutate(meal) });
+    },
+    onError: (err, _meal, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(queryKey, ctx.previous);
       haptics.error();
       Alert.alert("Couldn't delete entry", extractErrorMessage(err));
     },
+    onSettled: () => invalidateTrackingData(queryClient),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (meal: MealEntry) =>
+      api.addMeal({
+        date,
+        meal_type: meal.meal_type,
+        name: meal.name,
+        ...(meal.food
+          ? { food: meal.food, servings: meal.servings ?? 1 }
+          : { calories: meal.calories, protein_g: meal.protein_g, carbs_g: meal.carbs_g, fat_g: meal.fat_g }),
+      }),
+    onError: (err) => Alert.alert("Couldn't restore entry", extractErrorMessage(err)),
     onSettled: () => invalidateTrackingData(queryClient),
   });
 
@@ -119,13 +154,7 @@ export default function NutritionScreen() {
   const openAddMeal = (mealType?: MealEntry['meal_type']) =>
     router.push({ pathname: '/meal/add', params: { date, ...(mealType ? { type: mealType } : {}) } });
 
-  const confirmDelete = (meal: MealEntry) => {
-    haptics.warning();
-    Alert.alert('Delete entry?', `Remove "${meal.name}" (${formatNumber(meal.calories)} kcal) from this day?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteMutation.mutate(meal.id) },
-    ]);
-  };
+  const openMeal = (meal: MealEntry) => router.push({ pathname: '/meal/[id]', params: { id: meal.id, date } });
 
   const day = nutritionData?.day;
   const targets = nutritionData?.targets;
@@ -326,8 +355,8 @@ export default function NutritionScreen() {
               <Animated.View key={group.type} entering={enter(4 + gi)}>
                 <Card style={styles.mealGroupCard}>
                   <View style={styles.mealGroupHeader}>
-                    <View style={[styles.mealGroupIcon, { backgroundColor: `${meta.color}22` }]}>
-                      <Icon size={16} color={meta.color} />
+                    <View style={[styles.mealGroupIcon, { backgroundColor: `${colors[meta.color]}22` }]}>
+                      <Icon size={16} color={colors[meta.color]} />
                     </View>
                     <Text style={styles.mealGroupTitle}>{meta.label}</Text>
                     <Text style={styles.mealGroupKcal}>{formatNumber(group.calories)} kcal</Text>
@@ -342,33 +371,14 @@ export default function NutritionScreen() {
                   </View>
 
                   {group.items.map((meal, mi) => (
-                    <View key={meal.id} style={[styles.mealRow, mi > 0 && styles.mealRowBorder]}>
-                      <View style={styles.mealInfo}>
-                        <Text style={styles.mealName} numberOfLines={1}>
-                          {meal.name}
-                        </Text>
-                        <View style={styles.macroChips}>
-                          <MacroChip letter="P" value={meal.protein_g} color={colors.cyan} />
-                          <MacroChip letter="C" value={meal.carbs_g} color={colors.amber} />
-                          <MacroChip letter="F" value={meal.fat_g} color={colors.violet} />
-                          {meal.servings ? (
-                            <Text style={styles.servingsTag}>
-                              {meal.servings} {meal.servings === 1 ? 'serving' : 'servings'}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </View>
-                      <Text style={styles.mealCalories}>{formatNumber(meal.calories)}</Text>
-                      <PressableScale
-                        haptic="none"
-                        onPress={() => confirmDelete(meal)}
-                        disabled={isPlaceholderData || (deleteMutation.isPending && deleteMutation.variables === meal.id)}
-                        style={styles.deleteBtn}
-                        accessibilityLabel={`Delete ${meal.name}`}
-                      >
-                        <Trash2 size={16} color={colors.textMuted} />
-                      </PressableScale>
-                    </View>
+                    <MealRow
+                      key={meal.id}
+                      meal={meal}
+                      bordered={mi > 0}
+                      disabled={isPlaceholderData}
+                      onOpen={() => openMeal(meal)}
+                      onDelete={() => deleteMutation.mutate(meal)}
+                    />
                   ))}
                 </Card>
               </Animated.View>
@@ -419,7 +429,83 @@ export default function NutritionScreen() {
   );
 }
 
+function MealRow({
+  meal,
+  bordered,
+  disabled,
+  onOpen,
+  onDelete,
+}: {
+  meal: MealEntry;
+  bordered: boolean;
+  disabled: boolean;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  return (
+    <ReanimatedSwipeable
+      friction={2}
+      rightThreshold={48}
+      overshootRight={false}
+      enabled={!disabled}
+      onSwipeableOpen={(direction) => {
+        if (direction === 'left') {
+          haptics.medium();
+          onDelete();
+        }
+      }}
+      renderRightActions={() => (
+        <View style={styles.swipeDelete}>
+          <Trash2 size={18} color="#FFFFFF" />
+          <Text style={styles.swipeDeleteText}>Delete</Text>
+        </View>
+      )}
+    >
+      <PressableScale
+        haptic="selection"
+        scaleTo={0.99}
+        onPress={onOpen}
+        disabled={disabled}
+        style={[styles.mealRow, bordered && styles.mealRowBorder]}
+        accessibilityLabel={`${meal.name}, ${formatNumber(meal.calories)} calories. Tap to edit`}
+        accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
+        onAccessibilityAction={(e) => e.nativeEvent.actionName === 'delete' && onDelete()}
+      >
+        <View style={styles.mealInfo}>
+          <Text style={styles.mealName} numberOfLines={1}>
+            {meal.name}
+          </Text>
+          <View style={styles.macroChips}>
+            <MacroChip letter="P" value={meal.protein_g} color={colors.cyan} />
+            <MacroChip letter="C" value={meal.carbs_g} color={colors.amber} />
+            <MacroChip letter="F" value={meal.fat_g} color={colors.violet} />
+            {meal.servings ? (
+              <Text style={styles.servingsTag}>
+                {meal.servings} {meal.servings === 1 ? 'serving' : 'servings'}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+        <Text style={styles.mealCalories}>{formatNumber(meal.calories)}</Text>
+        <PressableScale
+          haptic="light"
+          onPress={onDelete}
+          disabled={disabled}
+          style={styles.deleteBtn}
+          accessibilityLabel={`Delete ${meal.name}`}
+        >
+          <Trash2 size={16} color={colors.textMuted} />
+        </PressableScale>
+      </PressableScale>
+    </ReanimatedSwipeable>
+  );
+}
+
 function HeroStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.heroStat}>
       <Text style={[styles.heroStatValue, accent && { color: colors.primaryLight }]}>{value}</Text>
@@ -429,6 +515,7 @@ function HeroStat({ label, value, accent }: { label: string; value: string; acce
 }
 
 function MacroChip({ letter, value, color }: { letter: string; value: number; color: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.macroChip}>
       <View style={[styles.macroDot, { backgroundColor: color }]} />
@@ -439,7 +526,7 @@ function MacroChip({ letter, value, color }: { letter: string; value: number; co
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   headerAddBtn: {
     width: 44,
     height: 44,
@@ -680,7 +767,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textSecondary,
   },
+  swipeDelete: {
+    width: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    backgroundColor: colors.error,
+    borderRadius: radius.md,
+    marginVertical: 4,
+  },
+  swipeDeleteText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
   mealRow: {
+    backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.sm + 2,
@@ -729,4 +831,4 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.primaryLight,
   },
-});
+}));

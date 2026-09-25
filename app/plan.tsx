@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -23,7 +23,7 @@ import {
   ProgressBar,
   ScreenSkeleton,
 } from '../src/components/ui';
-import { colors, radius, spacing } from '../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../src/theme';
 import { haptics } from '../src/lib/haptics';
 import type { RoutineExercise } from '../src/types';
 
@@ -37,13 +37,15 @@ function plannedLoad(ex: RoutineExercise) {
 }
 
 function dayTone(day: ProgramDay, currentDay: number) {
-  if (day.status === 'COMPLETED') return { label: 'Completed', tone: 'emerald' as const, color: colors.primaryLight };
-  if (day.status === 'MISSED') return { label: 'Resume', tone: 'amber' as const, color: colors.amber };
-  if (day.day_number === currentDay) return { label: 'Today', tone: 'cyan' as const, color: colors.cyan };
-  return { label: 'Upcoming', tone: 'slate' as const, color: colors.textMuted };
+  if (day.status === 'COMPLETED') return { label: 'Completed', tone: 'emerald' as const };
+  if (day.status === 'MISSED') return { label: 'Resume', tone: 'amber' as const };
+  if (day.day_number === currentDay) return { label: 'Today', tone: 'cyan' as const };
+  return { label: 'Upcoming', tone: 'slate' as const };
 }
 
 export default function PlanScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const { data, isLoading, isError, error, refetch, isRefetching } = useQuery({
     queryKey: ['workoutPlan'],
@@ -299,6 +301,7 @@ export default function PlanScreen() {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.stat}>
       <Text style={styles.statLabel}>{label}</Text>
@@ -307,7 +310,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -534,4 +537,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     lineHeight: 17,
   },
-});
+}));

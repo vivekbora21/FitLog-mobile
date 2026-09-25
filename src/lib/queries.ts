@@ -4,7 +4,19 @@ import type { QueryClient } from '@tanstack/react-query';
 // aggregates too, so every write refreshes the screens that summarise it.
 export function invalidateTrackingData(queryClient: QueryClient) {
   return Promise.all(
-    ['nutritionDay', 'dashboardStats', 'dailyLog', 'workoutSessions', 'todaysWorkout', 'workoutPlan', 'recentFoods'].map((key) =>
+    [
+      'nutritionDay',
+      'dashboardStats',
+      'dailyLog',
+      'workoutSessions',
+      'workoutSession',
+      'todaysWorkout',
+      'workoutPlan',
+      'recentFoods',
+      'personalRecords',
+      'recentExercises',
+      'lastPerformance',
+    ].map((key) =>
       queryClient.invalidateQueries({ queryKey: [key] })
     )
   );

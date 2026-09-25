@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { Minus, Plus } from 'lucide-react-native';
 import { PressableScale } from './PressableScale';
-import { colors, radius } from '../../theme';
+import { radius, makeStyles, useTheme } from '../../theme';
 
 interface StepperProps {
   onDecrement: () => void;
@@ -20,8 +20,11 @@ export function Stepper({
   canDecrement = true,
   disabled = false,
   label,
-  accentColor = colors.primaryLight,
+  accentColor: accentColorProp,
 }: StepperProps) {
+  const { colors } = useTheme();
+  const accentColor = accentColorProp ?? colors.primaryLight;
+  const styles = useStyles();
   return (
     <View style={styles.row}>
       <PressableScale
@@ -46,7 +49,7 @@ export function Stepper({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   row: {
     flexDirection: 'row',
     gap: 8,
@@ -62,4 +65,4 @@ const styles = StyleSheet.create({
   btnDisabled: {
     opacity: 0.4,
   },
-});
+}));

@@ -1,20 +1,25 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, Trash2, Check } from 'lucide-react-native';
+import { ChevronLeft, Trash2, Check, Pencil } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../../src/api/client';
-import { Button, Card, ErrorState, PressableScale, ScreenSkeleton } from '../../src/components/ui';
-import { colors, radius, spacing } from '../../src/theme';
+import { Button, Card, ErrorState, PressableScale, ScreenSkeleton, useToast } from '../../src/components/ui';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import type { WorkoutSession } from '../../src/types';
 import { formatDuration, formatVolume } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
 
+const SET_TYPE_LABEL: Record<string, string> = { WARMUP: 'Warm-up', DROP: 'Drop', FAILURE: 'Failure' };
+
 export default function WorkoutDetailScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const { data: session, isLoading, isError, error, refetch, isRefetching } = useQuery({
@@ -33,6 +38,7 @@ export default function WorkoutDetailScreen() {
     onSuccess: async () => {
       haptics.success();
       await invalidateTrackingData(queryClient);
+      toast({ message: 'Workout deleted' });
       router.back();
     },
     onError: (err) => {
@@ -55,7 +61,18 @@ export default function WorkoutDetailScreen() {
         <ChevronLeft size={22} color={colors.textPrimary} />
       </PressableScale>
       <Text style={styles.topTitle}>Workout</Text>
-      <View style={styles.backBtn} />
+      {session ? (
+        <PressableScale
+          haptic="selection"
+          onPress={() => router.push({ pathname: '/workout/log', params: { edit: id } })}
+          style={styles.backBtn}
+          accessibilityLabel="Edit workout"
+        >
+          <Pencil size={18} color={colors.primaryLight} />
+        </PressableScale>
+      ) : (
+        <View style={styles.backBtn} />
+      )}
     </View>
   );
 
@@ -117,7 +134,9 @@ export default function WorkoutDetailScreen() {
             {ex.primary_muscle ? <Text style={styles.exerciseMuscle}>{ex.primary_muscle}</Text> : null}
             {(ex.sets ?? []).map((s) => (
               <View key={s.id ?? s.set_number} style={styles.setRow}>
-                <Text style={styles.setNum}>Set {s.set_number}</Text>
+                <Text style={styles.setNum}>
+                  {s.set_type && s.set_type !== 'NORMAL' ? SET_TYPE_LABEL[s.set_type] : `Set ${s.set_number}`}
+                </Text>
                 <Text style={styles.setValue}>
                   {s.weight_kg} kg × {s.reps}
                 </Text>
@@ -151,6 +170,7 @@ export default function WorkoutDetailScreen() {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.stat} accessible accessibilityLabel={`${label}: ${value}`}>
       <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>
@@ -161,7 +181,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -289,4 +309,4 @@ const styles = StyleSheet.create({
     borderColor: colors.errorBorder,
     backgroundColor: colors.errorBackground,
   },
-});
+}));

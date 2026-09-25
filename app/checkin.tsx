@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { Text, StyleSheet, Alert, View, ActivityIndicator } from 'react-native';
+import { Text, Alert, View, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Footprints, Moon, Scale } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
 import { Button, ChipGroup, DateNavigator, Input, SheetScreen } from '../src/components/ui';
-import { colors, spacing } from '../src/theme';
+import { spacing, makeStyles, useTheme } from '../src/theme';
 import { isValidDateKey, parseNumberInput, toDateKey } from '../src/lib/format';
 import { invalidateTrackingData } from '../src/lib/queries';
 import { useAuth } from '../src/providers/auth';
@@ -17,6 +17,8 @@ const RATING_OPTIONS = [1, 2, 3, 4, 5].map((v) => ({ value: v, label: String(v) 
 const numText = (n?: number | null) => (n == null ? '' : String(n));
 
 export default function CheckInScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const params = useLocalSearchParams<{ date?: string }>();
   const [date, setDate] = useState(() => (isValidDateKey(params.date) ? params.date : toDateKey(new Date())));
 
@@ -62,6 +64,8 @@ function CheckInForm({
   log: DailyLog | null;
   existingWeight: WeightEntry | null;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { refreshUser } = useAuth();
@@ -182,7 +186,7 @@ function CheckInForm({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   loader: {
     marginBottom: spacing.md,
   },
@@ -202,4 +206,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
   },
-});
+}));

@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { PressableScale } from './PressableScale';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 import { formatDayLabel, parseDateKey, shiftDateKey, toDateKey } from '../../lib/format';
 
 interface DateNavigatorProps {
@@ -12,6 +12,8 @@ interface DateNavigatorProps {
 
 /** Previous / next day stepper. Future days are blocked since nothing can be logged there yet. */
 export function DateNavigator({ date, onChange }: DateNavigatorProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const todayKey = toDateKey(new Date());
   const isToday = date >= todayKey;
   const label = formatDayLabel(date);
@@ -56,7 +58,7 @@ export function DateNavigator({ date, onChange }: DateNavigatorProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -96,4 +98,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 1,
   },
-});
+}));

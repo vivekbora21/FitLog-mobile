@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, Alert } from 'react-native';
+import { View, Text, ScrollView, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,15 +33,18 @@ import {
   Stepper,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
-import { colors, radius, spacing } from '../../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { formatNumber, calculateMacroPercentage } from '../../src/types';
 import { formatVolume, getGreeting, getLastSevenDays, toDateKey } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
+import { ResumeWorkoutBanner } from '../../src/features/workout/ResumeWorkoutBanner';
 import { invalidateTrackingData } from '../../src/lib/queries';
 
 const enter = (i: number) => FadeInDown.delay(80 + i * 70).duration(450);
 
 export default function DashboardScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { user } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -208,6 +211,8 @@ export default function DashboardScreen() {
             <Text style={styles.streakValue}>{stats?.streak_days ?? 0}</Text>
           </View>
         </Animated.View>
+
+        <ResumeWorkoutBanner />
 
         {/* Week strip */}
         <Animated.View entering={enter(0)}>
@@ -535,6 +540,7 @@ export default function DashboardScreen() {
 }
 
 function QuickAction({ icon, label, onPress }: { icon: React.ReactNode; label: string; onPress: () => void }) {
+  const styles = useStyles();
   return (
     <PressableScale onPress={onPress} style={styles.quickAction} accessibilityLabel={label}>
       <View style={styles.quickIcon}>{icon}</View>
@@ -544,6 +550,7 @@ function QuickAction({ icon, label, onPress }: { icon: React.ReactNode; label: s
 }
 
 function JourneyStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.journeyMetricItem}>
       <View style={styles.journeyStatLabelRow}>
@@ -555,7 +562,7 @@ function JourneyStat({ icon, label, value }: { icon: React.ReactNode; label: str
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   quickRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -1022,4 +1029,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: '600',
   },
-});
+}));

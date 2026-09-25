@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ViewStyle } from 'react-native';
-import { colors, radius, spacing } from '../../theme';
+import { View, Text, ViewStyle } from 'react-native';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
 interface BadgeProps {
   label: string;
@@ -10,6 +10,8 @@ interface BadgeProps {
 }
 
 export function Badge({ label, tone = 'emerald', icon, style }: BadgeProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const getContainerStyle = (): ViewStyle[] => {
     const list: ViewStyle[] = [styles.badge];
     if (tone === 'cyan') list.push(styles.cyan);
@@ -40,7 +42,7 @@ export function Badge({ label, tone = 'emerald', icon, style }: BadgeProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(() => ({
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -83,4 +85,4 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(148, 163, 184, 0.12)',
     borderColor: 'rgba(148, 163, 184, 0.25)',
   },
-});
+}));

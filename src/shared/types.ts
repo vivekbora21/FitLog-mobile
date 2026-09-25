@@ -64,6 +64,8 @@ export interface Exercise {
   instructions: string;
   video_url?: string | null;
   is_global: boolean;
+  /** The member's own movement (editable by them only). */
+  is_custom?: boolean;
 }
 
 export interface RoutineExercise {

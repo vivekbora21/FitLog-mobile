@@ -1,10 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { X } from 'lucide-react-native';
 import { PressableScale } from './PressableScale';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
 interface SheetScreenProps {
   title: string;
@@ -20,6 +20,8 @@ interface SheetScreenProps {
 
 /** Chrome for modal editing screens: title bar with close, keyboard-aware scroll body, sticky footer. */
 export function SheetScreen({ title, subtitle, children, footer, onClose, rightAction }: SheetScreenProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
 
   return (
@@ -58,7 +60,7 @@ export function SheetScreen({ title, subtitle, children, footer, onClose, rightA
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -111,4 +113,4 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.background,
   },
-});
+}));

@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
   RefreshControl,
   Alert,
@@ -45,7 +44,7 @@ import {
   ScreenHeader,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
-import { colors, radius, spacing, shadows } from '../../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { formatDayLabel, parseNumberInput, toDateKey } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
 import { useAuth } from '../../src/providers/auth';
@@ -64,6 +63,8 @@ const MUSCLE_FILTERS = ['All', 'Chest', 'Back', 'Legs', 'Shoulders', 'Arms'];
 const enter = (i: number) => FadeInDown.delay(50 + i * 50).duration(400);
 
 export default function ProgressScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const bottomClearance = useTabBarClearance();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -430,6 +431,8 @@ function WeightSection({
   onDelete: (id: string, label: string) => void;
   isLoading: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.sectionWrap}>
       {/* KPI Cards Row */}
@@ -653,6 +656,8 @@ function WeightSvgChart({
   weights: WeightEntry[];
   targetWeight: number | null;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [layoutWidth, setLayoutWidth] = useState(320);
   const chartHeight = 180;
   const paddingHoriz = 24;
@@ -837,6 +842,8 @@ function PrsSection({
   setSelectedMuscle: (v: string) => void;
   isLoading: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.sectionWrap}>
       {/* Search and Filters */}
@@ -1005,6 +1012,8 @@ function MeasurementsSection({
   onDelete: (id: string) => void;
   isLoading: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   // Sort oldest to newest for delta calculations
   const chrono = useMemo(() => {
     return [...measurements].sort(
@@ -1222,6 +1231,7 @@ function MeasurementSummaryCard({
   label: string;
   delta: { first: number; latest: number; delta: number } | null;
 }) {
+  const styles = useStyles();
   return (
     <View style={styles.metricCard}>
       <Text style={styles.metricCardLabel}>{label}</Text>
@@ -1252,7 +1262,7 @@ function MeasurementSummaryCard({
 // STYLES
 // ==========================================
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1703,4 +1713,4 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: spacing.sm,
   },
-});
+}));

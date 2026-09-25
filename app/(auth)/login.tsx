@@ -2,7 +2,6 @@ import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -36,7 +35,7 @@ import {
 import { useAuth } from '../../src/providers/auth';
 import { api, extractErrorMessage } from '../../src/api/client';
 import { Button, Input, Card } from '../../src/components/ui';
-import { colors, radius, spacing } from '../../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { haptics } from '../../src/lib/haptics';
 import { getFlag } from '../../src/lib/secureStore';
 import { needsOnboarding, onboardingSkipKey } from '../../src/lib/onboarding';
@@ -53,6 +52,8 @@ const loginSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
@@ -233,6 +234,18 @@ export default function LoginScreen() {
             )}
           />
 
+          <TouchableOpacity
+            onPress={() => {
+              haptics.selection();
+              router.push('/(auth)/forgot-password');
+            }}
+            hitSlop={8}
+            style={styles.forgotLink}
+            accessibilityRole="link"
+          >
+            <Text style={styles.footerLink}>Forgot password?</Text>
+          </TouchableOpacity>
+
           {/* Submit Button */}
           <Button
             title="Log In"
@@ -244,7 +257,8 @@ export default function LoginScreen() {
             style={styles.submitBtn}
           />
 
-          {/* Demo Credentials Quick Fill */}
+          {/* Demo Credentials Quick Fill — development builds only */}
+          {__DEV__ && (
           <View style={styles.demoSection}>
             <View style={styles.demoHeader}>
               <Sparkles size={14} color={colors.primaryLight} />
@@ -271,6 +285,7 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
           </View>
+          )}
           {/* Sign Up Link */}
           <View style={styles.footerRow}>
             <Text style={styles.footerText}>Don&apos;t have an account? </Text>
@@ -350,7 +365,7 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -541,9 +556,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
   },
+  forgotLink: {
+    alignSelf: 'flex-end',
+    marginTop: -spacing.xs,
+    marginBottom: spacing.md,
+  },
   footerLink: {
     fontSize: 13,
     fontWeight: '700',
     color: colors.primaryLight,
   },
-});
+}));

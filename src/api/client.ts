@@ -20,6 +20,8 @@ import type {
   PersonalRecord,
   BodyMeasurement,
   Exercise,
+  MuscleGroup,
+  EquipmentType,
   RoutineExercise,
   JourneyMode,
 } from '../types';
@@ -93,6 +95,41 @@ export function resolveDefaultApiUrl(): string {
 
 export const DEFAULT_API_URL = resolveDefaultApiUrl();
 
+// User-facing copy for transport failures; the technical detail goes to the dev console.
+export const OFFLINE_MESSAGE = "You're offline or the server can't be reached. Check your connection and try again.";
+export const TIMEOUT_MESSAGE = 'The server is taking too long to respond. Please try again in a moment.';
+
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 0 || err.status === 408);
+}
+
+export interface LastPerformance {
+  date: string;
+  sets: { set_type: WorkoutSet['set_type']; weight_kg: number; reps: number }[];
+}
+
+export interface RecentExercise {
+  id: string;
+  name: string;
+  primary_muscle_name: string;
+  last_date: string;
+}
+
+export type WorkoutSessionPayload = {
+  title: string;
+  routine?: string | null;
+  started_at: string;
+  duration_seconds: number;
+  notes?: string;
+  exercises: {
+    exercise: string;
+    order: number;
+    rest_seconds?: number;
+    notes?: string;
+    sets: Pick<WorkoutSet, 'set_number' | 'set_type' | 'weight_kg' | 'reps' | 'completed'>[];
+  }[];
+};
+
 export class ApiError extends Error {
   status: number;
   data: any;
@@ -108,6 +145,10 @@ export class ApiError extends Error {
 export function extractErrorMessage(err: any): string {
   if (!err) return 'An unexpected error occurred. Please try again.';
   if (typeof err === 'string') return err;
+  if (err instanceof ApiError) {
+    if (isNetworkError(err)) return err.message;
+    if (err.status >= 500) return 'Something went wrong on our side. Please try again shortly.';
+  }
   if (err.data) {
     if (typeof err.data.detail === 'string') return err.data.detail;
     if (typeof err.data.message === 'string') return err.data.message;
@@ -137,7 +178,7 @@ class ApiClient {
   private baseUrl: string = DEFAULT_API_URL;
   private unauthorizedHandler: UnauthorizedHandler | null = null;
   private isRefreshing: boolean = false;
-  private refreshSubscribers: Array<(token: string) => void> = [];
+  private refreshSubscribers: Array<(token: string | null) => void> = [];
 
   constructor() {
     this.baseUrl = resolveDefaultApiUrl();
@@ -155,12 +196,13 @@ class ApiClient {
     this.unauthorizedHandler = handler;
   }
 
-  private onTokenRefreshed(token: string) {
+  // null tells waiting requests the refresh failed, so they reject instead of hanging.
+  private onTokenRefreshed(token: string | null) {
     this.refreshSubscribers.forEach((cb) => cb(token));
     this.refreshSubscribers = [];
   }
 
-  private addRefreshSubscriber(cb: (token: string) => void) {
+  private addRefreshSubscriber(cb: (token: string | null) => void) {
     this.refreshSubscribers.push(cb);
   }
 
@@ -191,18 +233,11 @@ class ApiClient {
         signal: controller.signal,
       });
     } catch (networkError: any) {
+      if (__DEV__) console.warn(`[api] ${options.method ?? 'GET'} ${url} failed:`, networkError);
       if (networkError.name === 'AbortError') {
-        throw new ApiError(
-          `Connection timed out after 10s connecting to ${url}. Make sure your phone and PC are connected to the same Wi-Fi network.`,
-          408,
-          networkError
-        );
+        throw new ApiError(TIMEOUT_MESSAGE, 408, networkError);
       }
-      throw new ApiError(
-        `Unable to reach backend at ${this.baseUrl}. Check that Django is running on port 8000 and reachable.`,
-        0,
-        networkError
-      );
+      throw new ApiError(OFFLINE_MESSAGE, 0, networkError);
     } finally {
       clearTimeout(timeoutId);
     }
@@ -228,6 +263,9 @@ class ApiClient {
         // Wait for current refresh to complete
         return new Promise<T>((resolve, reject) => {
           this.addRefreshSubscriber(async (newToken) => {
+            if (!newToken) {
+              return reject(new ApiError('Could not refresh session.', 401));
+            }
             try {
               const retryHeaders = {
                 ...headers,
@@ -248,8 +286,9 @@ class ApiClient {
 
       this.isRefreshing = true;
 
+      let refreshResponse: Response;
       try {
-        const refreshResponse = await fetch(`${this.baseUrl}/auth/refresh/`, {
+        refreshResponse = await fetch(`${this.baseUrl}/auth/refresh/`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -257,7 +296,20 @@ class ApiClient {
           },
           body: JSON.stringify({ refresh: refreshToken }),
         });
+      } catch (networkError) {
+        // Server unreachable: keep the tokens so the session survives until we're back online.
+        this.isRefreshing = false;
+        this.onTokenRefreshed(null);
+        throw new ApiError(OFFLINE_MESSAGE, 0, networkError);
+      }
 
+      try {
+        if (refreshResponse.status >= 500) {
+          // Backend hiccup, not a verdict on the refresh token.
+          this.isRefreshing = false;
+          this.onTokenRefreshed(null);
+          throw new ApiError(`Server error while refreshing session: ${refreshResponse.status}`, refreshResponse.status);
+        }
         if (!refreshResponse.ok) {
           throw new Error('Refresh token invalid');
         }
@@ -271,16 +323,17 @@ class ApiClient {
 
         this.onTokenRefreshed(newAccess);
         this.isRefreshing = false;
-
-        // Retry the original request
-        return this.request<T>(endpoint, options, true);
       } catch (refreshErr) {
+        if (refreshErr instanceof ApiError) throw refreshErr;
         this.isRefreshing = false;
-        this.refreshSubscribers = [];
+        this.onTokenRefreshed(null);
         await clearTokens();
         if (this.unauthorizedHandler) this.unauthorizedHandler();
         throw new ApiError('Session expired. Please log in again.', 401, refreshErr);
       }
+
+      // Retry the original request outside the try, so its errors never wipe the session
+      return this.request<T>(endpoint, options, true);
     }
 
     if (!response.ok) {
@@ -365,6 +418,24 @@ class ApiClient {
   }
 
   async logout(): Promise<void> {
+    await clearTokens();
+  }
+
+  async changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    await this.post('/auth/change-password/', { old_password: oldPassword, new_password: newPassword });
+  }
+
+  async requestPasswordReset(email: string): Promise<void> {
+    await this.post('/auth/password-reset/', { email: email.trim() });
+  }
+
+  async confirmPasswordReset(email: string, code: string, newPassword: string): Promise<void> {
+    await this.post('/auth/password-reset/confirm/', { email: email.trim(), code: code.trim(), new_password: newPassword });
+  }
+
+  // Permanently deletes the account server-side, then drops local tokens.
+  async deleteAccount(password: string): Promise<void> {
+    await this.post('/auth/delete-account/', { password });
     await clearTokens();
   }
 
@@ -465,6 +536,14 @@ class ApiClient {
     return this.post<MealEntry>('/nutrition/meals/', meal);
   }
 
+  // With a food, the server recomputes macros from `servings`; free-text meals send values directly.
+  async updateMeal(
+    mealId: string,
+    patch: Partial<Pick<MealEntry, 'meal_type' | 'name' | 'servings' | 'calories' | 'protein_g' | 'carbs_g' | 'fat_g'>>
+  ): Promise<MealEntry> {
+    return this.patch<MealEntry>(`/nutrition/meals/${mealId}/`, patch);
+  }
+
   async deleteMeal(mealId: string): Promise<void> {
     await this.delete(`/nutrition/meals/${mealId}/`);
   }
@@ -495,25 +574,41 @@ class ApiClient {
     return this.get<WorkoutSession>(`/workouts/sessions/${id}/`);
   }
 
-  async createWorkoutSession(session: {
-    title: string;
-    routine?: string | null;
-    started_at: string;
-    duration_seconds: number;
-    notes?: string;
-    exercises: {
-      exercise: string;
-      order: number;
-      rest_seconds?: number;
-      notes?: string;
-      sets: Pick<WorkoutSet, 'set_number' | 'set_type' | 'weight_kg' | 'reps' | 'completed'>[];
-    }[];
-  }): Promise<WorkoutSession> {
+  async createWorkoutSession(session: WorkoutSessionPayload): Promise<WorkoutSession> {
     return this.post<WorkoutSession>('/workouts/sessions/', session);
   }
 
-  async searchExercises(search: string): Promise<Exercise[]> {
-    return unwrapList(await this.get('/exercises/', { search }));
+  // Replaces the session's exercises and sets; the server rebuilds affected PRs.
+  async updateWorkoutSession(id: string, session: Omit<WorkoutSessionPayload, 'routine'>): Promise<WorkoutSession> {
+    return this.put<WorkoutSession>(`/workouts/sessions/${id}/`, session);
+  }
+
+  async getLastPerformance(exerciseIds: string[], excludeSession?: string): Promise<Record<string, LastPerformance>> {
+    if (exerciseIds.length === 0) return {};
+    return this.get('/workouts/sessions/last-performance/', {
+      exercises: exerciseIds.join(','),
+      exclude_session: excludeSession,
+    });
+  }
+
+  async getRecentExercises(): Promise<RecentExercise[]> {
+    return this.get<RecentExercise[]>('/workouts/sessions/recent-exercises/');
+  }
+
+  async searchExercises(search: string, muscle?: string): Promise<Exercise[]> {
+    return unwrapList(await this.get('/exercises/', { search: search || undefined, muscle }));
+  }
+
+  async getMuscleGroups(): Promise<MuscleGroup[]> {
+    return unwrapList(await this.get('/muscle-groups/'));
+  }
+
+  async getEquipmentTypes(): Promise<EquipmentType[]> {
+    return unwrapList(await this.get('/equipment-types/'));
+  }
+
+  async createExercise(data: { name: string; primary_muscle: string; equipment: string }): Promise<Exercise> {
+    return this.post<Exercise>('/exercises/', data);
   }
 
   async deleteWorkoutSession(id: string): Promise<void> {

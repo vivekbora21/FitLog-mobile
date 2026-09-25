@@ -3,11 +3,10 @@ import {
   View,
   Text,
   TextInput,
-  StyleSheet,
   TextInputProps,
   ViewStyle,
 } from 'react-native';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
 interface InputProps extends TextInputProps {
   label?: string;
@@ -30,6 +29,8 @@ export function Input({
   ref,
   ...rest
 }: InputProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [focused, setFocused] = useState(false);
 
   return (
@@ -71,7 +72,7 @@ export function Input({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   container: {
     marginBottom: spacing.lg,
   },
@@ -115,4 +116,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     fontWeight: '500',
   },
-});
+}));

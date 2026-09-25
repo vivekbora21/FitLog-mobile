@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Alert } from 'react-native';
+import { View, Text, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, Dumbbell, Flame, Play, Scale, Target, TrendingDown, TrendingUp, Zap } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
 import { Button, ChipGroup, Input, PressableScale, SheetScreen } from '../src/components/ui';
-import { colors, radius, spacing } from '../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../src/theme';
 import { parseNumberInput } from '../src/lib/format';
 import { haptics } from '../src/lib/haptics';
 import { useAuth } from '../src/providers/auth';
@@ -16,7 +16,8 @@ interface Blueprint {
   name: string;
   mode: JourneyMode;
   modeLabel: string;
-  color: string;
+  /** Palette key, resolved against the active theme when rendered. */
+  color: 'rose' | 'violet' | 'cyan' | 'amber';
   Icon: typeof Flame;
   durationDays: number;
   description: string;
@@ -31,7 +32,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '60-Day Recomp & Shred',
     mode: 'CUT',
     modeLabel: 'Cut',
-    color: colors.rose,
+    color: 'rose',
     Icon: Flame,
     durationDays: 60,
     description: 'Strip body fat and reveal definition while locking in compound anchor strength.',
@@ -43,7 +44,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '90-Day Mass Architecture',
     mode: 'BULK',
     modeLabel: 'Bulk',
-    color: colors.violet,
+    color: 'violet',
     Icon: Dumbbell,
     durationDays: 90,
     description: 'Clean surplus pacing to maximise hypertrophy without excess fat gain.',
@@ -55,7 +56,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '30-Day Strength Peak',
     mode: 'FOCUS',
     modeLabel: 'Focus',
-    color: colors.cyan,
+    color: 'cyan',
     Icon: Target,
     durationDays: 30,
     description: 'Heavy compound progression (RPE 8.5–9.5) to break plateaus and set PRs.',
@@ -67,7 +68,7 @@ const BLUEPRINTS: Blueprint[] = [
     name: '21-Day Habit Lock-in',
     mode: 'HABIT',
     modeLabel: 'Habit',
-    color: colors.amber,
+    color: 'amber',
     Icon: Zap,
     durationDays: 21,
     description: '3 full-body sessions a week focused on consistency and routine momentum.',
@@ -94,6 +95,8 @@ const MAX_PLAN_DAYS = 365;
 const round1 = (n: number) => Number(n.toFixed(1));
 
 export default function PlanSelectScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, refreshUser } = useAuth();
@@ -220,9 +223,9 @@ export default function PlanSelectScreen() {
                 accessibilityLabel={bp.name}
               >
                 <View style={styles.bpHeader}>
-                  <View style={[styles.bpMode, { backgroundColor: `${bp.color}1F` }]}>
-                    <bp.Icon size={13} color={bp.color} />
-                    <Text style={[styles.bpModeText, { color: bp.color }]}>{bp.modeLabel}</Text>
+                  <View style={[styles.bpMode, { backgroundColor: `${colors[bp.color]}1F` }]}>
+                    <bp.Icon size={13} color={colors[bp.color]} />
+                    <Text style={[styles.bpModeText, { color: colors[bp.color] }]}>{bp.modeLabel}</Text>
                   </View>
                   <Text style={styles.bpDuration}>{bp.durationDays} days</Text>
                 </View>
@@ -298,7 +301,7 @@ export default function PlanSelectScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   bpCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -386,4 +389,4 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: spacing.lg,
   },
-});
+}));

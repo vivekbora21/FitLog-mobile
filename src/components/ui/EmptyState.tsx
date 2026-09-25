@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { colors, radius, spacing } from '../../theme';
+import { View, Text } from 'react-native';
+import { radius, spacing, makeStyles } from '../../theme';
 
 interface EmptyStateProps {
   title: string;
@@ -10,6 +10,7 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({ title, description, icon, action }: EmptyStateProps) {
+  const styles = useStyles();
   return (
     <View style={styles.container}>
       {icon && <View style={styles.iconContainer}>{icon}</View>}
@@ -20,7 +21,7 @@ export function EmptyState({ title, description, icon, action }: EmptyStateProps
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   container: {
     padding: spacing.xxl,
     alignItems: 'center',
@@ -56,4 +57,4 @@ const styles = StyleSheet.create({
   actionContainer: {
     marginTop: spacing.lg,
   },
-});
+}));

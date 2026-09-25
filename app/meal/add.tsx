@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Alert, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, Check, Minus, Plus, PencilLine, History } from 'lucide-react-native';
 import { api, extractErrorMessage, type MealType } from '../../src/api/client';
 import { Button, ChipGroup, Input, PressableScale, SheetScreen } from '../../src/components/ui';
-import { colors, radius, spacing } from '../../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { formatNumber } from '../../src/types';
 import { formatDayLabel, isValidDateKey, parseNumberInput, toDateKey } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
@@ -48,6 +48,8 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export default function AddMealScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const router = useRouter();
   const queryClient = useQueryClient();
   const params = useLocalSearchParams<{ date?: string; type?: string }>();
@@ -344,6 +346,7 @@ function SegmentButton({
   icon: React.ReactNode;
   onPress: () => void;
 }) {
+  const styles = useStyles();
   return (
     <PressableScale
       haptic="selection"
@@ -358,7 +361,7 @@ function SegmentButton({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   segment: {
     flexDirection: 'row',
     backgroundColor: colors.surface,
@@ -521,4 +524,4 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-});
+}));

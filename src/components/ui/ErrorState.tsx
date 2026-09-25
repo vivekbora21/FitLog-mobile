@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import { WifiOff, RefreshCw } from 'lucide-react-native';
 import { Button } from './Button';
-import { colors, radius, spacing } from '../../theme';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
 interface ErrorStateProps {
   title?: string;
@@ -12,6 +12,8 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({ title = 'Something went wrong', message, onRetry, retrying }: ErrorStateProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.container}>
       <View style={styles.iconCircle}>
@@ -32,7 +34,7 @@ export function ErrorState({ title = 'Something went wrong', message, onRetry, r
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   container: {
     flex: 1,
     justifyContent: 'center',
@@ -68,4 +70,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     minWidth: 160,
   },
-});
+}));

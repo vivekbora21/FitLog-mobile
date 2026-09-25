@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -30,15 +30,18 @@ import {
   ScreenSkeleton,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
-import { colors, radius, spacing } from '../../src/theme';
+import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import type { WorkoutSession } from '../../src/types';
 import { formatDuration, formatRelativeDay, formatVolume } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
+import { ResumeWorkoutBanner } from '../../src/features/workout/ResumeWorkoutBanner';
 
 const COLLAPSED_EXERCISES = 4;
 const enter = (i: number) => FadeInDown.delay(60 + i * 60).duration(420);
 
 export default function WorkoutsScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const bottomClearance = useTabBarClearance();
   const router = useRouter();
   const [showAllExercises, setShowAllExercises] = useState(false);
@@ -148,6 +151,8 @@ export default function WorkoutsScreen() {
             </PressableScale>
           }
         />
+
+        <ResumeWorkoutBanner />
 
         {/* 7-day summary */}
         <Animated.View entering={enter(0)} style={styles.summaryRow}>
@@ -377,6 +382,7 @@ function SummaryTile({
   label: string;
   tint: string;
 }) {
+  const styles = useStyles();
   return (
     <View style={styles.summaryTile} accessible accessibilityLabel={`${label}: ${value}`}>
       <View style={[styles.summaryIcon, { backgroundColor: tint }]}>{icon}</View>
@@ -389,6 +395,8 @@ function SummaryTile({
 }
 
 function SessionRow({ session, onPress }: { session: WorkoutSession; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const date = session.started_at ? new Date(session.started_at) : null;
   const duration = formatDuration(session.duration_seconds);
   const exerciseCount = session.exercises?.length || 0;
@@ -432,7 +440,7 @@ function SessionRow({ session, onPress }: { session: WorkoutSession; onPress: ()
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   headerAddBtn: {
     width: 44,
     height: 44,
@@ -717,4 +725,4 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: 2,
   },
-});
+}));

@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, StyleSheet, ViewStyle, ViewProps } from 'react-native';
+import { View, ViewStyle, ViewProps } from 'react-native';
 import { PressableScale } from './PressableScale';
-import { colors, radius, shadows, spacing } from '../../theme';
+import { radius, spacing, makeStyles } from '../../theme';
 
 interface CardProps extends ViewProps {
   elevated?: boolean;
@@ -22,6 +22,7 @@ export function Card({
   children,
   ...rest
 }: CardProps) {
+  const styles = useStyles();
   const cardStyle = [
     styles.card,
     elevated && styles.cardElevated,
@@ -49,7 +50,7 @@ export function Card({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -67,4 +68,4 @@ const styles = StyleSheet.create({
     borderColor: colors.borderGlow,
     backgroundColor: colors.surfaceHighlighted,
   },
-});
+}));

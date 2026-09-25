@@ -3,11 +3,12 @@ import { Tabs, useRouter } from 'expo-router';
 import { LayoutDashboard, Dumbbell, Utensils, TrendingUp, User } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { TabBar } from '../../src/components/navigation/TabBar';
-import { colors } from '../../src/theme';
+import { useTheme } from '../../src/theme';
 import { getFlag } from '../../src/lib/secureStore';
 import { needsOnboarding, onboardingSkipKey } from '../../src/lib/onboarding';
 
 export default function TabLayout() {
+  const { colors } = useTheme();
   const { isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
   const promptedFor = useRef<string | number | null>(null);

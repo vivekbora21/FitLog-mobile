@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, LayoutChangeEvent } from 'react-native';
+import { View, Text, Pressable, LayoutChangeEvent } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { haptics } from '../../lib/haptics';
-import { colors, radius, shadows, spacing } from '../../theme';
+import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
 type TabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -25,6 +25,8 @@ export function useTabBarClearance(): number {
 }
 
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const [barWidth, setBarWidth] = useState(0);
   const tabWidth = barWidth / state.routes.length;
@@ -110,6 +112,7 @@ interface TabItemProps {
 }
 
 function TabItem({ label, focused, icon, color, onPress, onLongPress }: TabItemProps) {
+  const styles = useStyles();
   const progress = useSharedValue(focused ? 1 : 0);
 
   useEffect(() => {
@@ -138,7 +141,7 @@ function TabItem({ label, focused, icon, color, onPress, onLongPress }: TabItemP
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   wrapper: {
     position: 'absolute',
     left: 0,
@@ -179,4 +182,4 @@ const styles = StyleSheet.create({
   labelFocused: {
     fontWeight: '800',
   },
-});
+}));

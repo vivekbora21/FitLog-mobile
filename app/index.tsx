@@ -1,12 +1,14 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/providers/auth';
-import { colors } from '../src/theme';
+import { makeStyles, useTheme } from '../src/theme';
 import { getFlag } from '../src/lib/secureStore';
 import { needsOnboarding, onboardingSkipKey } from '../src/lib/onboarding';
 
 export default function Index() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { isLoading, isAuthenticated, user } = useAuth();
   const router = useRouter();
 
@@ -37,11 +39,11 @@ export default function Index() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   container: {
     flex: 1,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
-});
+}));

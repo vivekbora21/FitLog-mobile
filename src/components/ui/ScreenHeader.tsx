@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { colors, spacing } from '../../theme';
+import { spacing, makeStyles } from '../../theme';
 
 interface ScreenHeaderProps {
   eyebrow?: string;
@@ -10,6 +10,7 @@ interface ScreenHeaderProps {
 }
 
 export function ScreenHeader({ eyebrow, title, right }: ScreenHeaderProps) {
+  const styles = useStyles();
   return (
     <Animated.View entering={FadeInDown.duration(400)} style={styles.row}>
       <View style={styles.textCol}>
@@ -23,7 +24,7 @@ export function ScreenHeader({ eyebrow, title, right }: ScreenHeaderProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -48,4 +49,4 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     letterSpacing: -0.6,
   },
-});
+}));

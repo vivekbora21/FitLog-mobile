@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
+import { View, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, extractErrorMessage } from '../src/api/client';
 import { Button, ChipGroup, Input, SheetScreen } from '../src/components/ui';
-import { spacing } from '../src/theme';
+import { spacing, makeStyles } from '../src/theme';
 import type { UserProfile } from '../src/types';
 import { parseNumberInput, toDateKey } from '../src/lib/format';
 import { useAuth } from '../src/providers/auth';
@@ -36,6 +36,7 @@ const GOAL_OPTIONS = [
 ];
 
 export default function EditProfileScreen() {
+  const styles = useStyles();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, refreshUser } = useAuth();
@@ -126,7 +127,7 @@ export default function EditProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(() => ({
   row: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -134,4 +135,4 @@ const styles = StyleSheet.create({
   half: {
     flex: 1,
   },
-});
+}));

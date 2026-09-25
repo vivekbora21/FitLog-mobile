@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
-import { colors, spacing } from '../../theme';
+import { View, ActivityIndicator, Text } from 'react-native';
+import { spacing, makeStyles, useTheme } from '../../theme';
 
 interface LoadingSpinnerProps {
   message?: string;
@@ -8,6 +8,8 @@ interface LoadingSpinnerProps {
 }
 
 export function LoadingSpinner({ message, fullScreen = false }: LoadingSpinnerProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={[styles.container, fullScreen && styles.fullScreen]}>
       <ActivityIndicator size="large" color={colors.primaryLight} />
@@ -16,7 +18,7 @@ export function LoadingSpinner({ message, fullScreen = false }: LoadingSpinnerPr
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   container: {
     padding: spacing.xl,
     alignItems: 'center',
@@ -32,4 +34,4 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '500',
   },
-});
+}));
