@@ -55,6 +55,12 @@ export interface WorkoutPlan {
 }
 
 export function resolveDefaultApiUrl(): string {
+  // 0. A hosted (https) backend configured via env always wins
+  const configuredUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (configuredUrl && configuredUrl.startsWith('https://')) {
+    return configuredUrl.replace(/\/$/, '');
+  }
+
   // 1. If running on web browser, always target localhost or browser hostname
   if (Platform.OS === 'web') {
     if (typeof window !== 'undefined' && window.location && window.location.hostname) {
