@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, ViewStyle, ViewProps } from 'react-native';
 import { PressableScale } from './PressableScale';
-import { colors, radius, spacing } from '../../theme';
+import { colors, radius, shadows, spacing } from '../../theme';
 
 interface CardProps extends ViewProps {
   elevated?: boolean;
@@ -61,11 +61,7 @@ const styles = StyleSheet.create({
   cardElevated: {
     backgroundColor: colors.surfaceElevated,
     borderColor: colors.borderSubtle,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 3,
+    ...shadows.elevated,
   },
   cardHighlighted: {
     borderColor: colors.borderGlow,

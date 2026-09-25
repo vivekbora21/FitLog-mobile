@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     height: TAB_BAR_HEIGHT,
-    backgroundColor: 'rgba(17, 24, 39, 0.97)',
+    backgroundColor: colors.tabBar,
     borderRadius: radius.xl + 4,
     borderWidth: BAR_BORDER,
     borderColor: colors.borderSubtle,

@@ -144,7 +144,8 @@ export default function LoginScreen() {
         </Animated.View>
 
         {/* Login Card */}
-        <Animated.View entering={FadeInDown.delay(120).duration(550)} style={shakeStyle}>
+        <Animated.View entering={FadeInDown.delay(120).duration(550)}>
+        <Animated.View style={shakeStyle}>
         <Card elevated style={styles.loginCard}>
           <Text style={styles.cardTitle}>Welcome back</Text>
           <Text style={styles.cardSubtitle}>
@@ -263,6 +264,7 @@ export default function LoginScreen() {
             </View>
           </View>
         </Card>
+        </Animated.View>
         </Animated.View>
 
         {/* Backend Server Configuration Toggle */}

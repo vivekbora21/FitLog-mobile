@@ -15,6 +15,7 @@ import {
   Check,
   Plus,
   ChevronRight,
+  CalendarDays,
 } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../../src/api/client';
 import {
@@ -169,6 +170,32 @@ export default function WorkoutsScreen() {
           />
         </Animated.View>
         <Text style={styles.summaryCaption}>Last 7 days</Text>
+
+        {/* Plan */}
+        <Animated.View entering={enter(1)}>
+          <PressableScale
+            haptic="selection"
+            scaleTo={0.98}
+            onPress={() => router.push('/plan')}
+            style={styles.planCard}
+            accessibilityLabel="Open workout plan"
+          >
+            <View style={[styles.summaryIcon, { backgroundColor: colors.primarySurface }]}>
+              <CalendarDays size={18} color={colors.primaryLight} />
+            </View>
+            <View style={styles.planText}>
+              <Text style={styles.planTitle} numberOfLines={1}>
+                {todayWorkout?.program?.name || 'Workout plan'}
+              </Text>
+              <Text style={styles.planMeta}>
+                {todayWorkout?.program
+                  ? `${todayWorkout.program.mode_label} · Day ${todayWorkout.program.current_day} of ${todayWorkout.program.duration_days}`
+                  : 'No active plan — tap to choose one'}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={colors.textMuted} />
+          </PressableScale>
+        </Animated.View>
 
         {/* Today */}
         <Animated.View entering={enter(1)}>
@@ -391,6 +418,30 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  planCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderGlow,
+    padding: spacing.md,
+    marginTop: spacing.lg,
+  },
+  planText: {
+    flex: 1,
+  },
+  planTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  planMeta: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   todayAction: {
     marginTop: spacing.md,

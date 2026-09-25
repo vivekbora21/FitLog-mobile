@@ -18,9 +18,41 @@ import type {
   WeightEntry,
   Exercise,
   RoutineExercise,
+  JourneyMode,
 } from '../types';
 
 export type MealType = MealEntry['meal_type'];
+
+export interface ProgramDay {
+  id: string;
+  day_number: number;
+  label: string;
+  is_optional: boolean;
+  status: 'UPCOMING' | 'COMPLETED' | 'MISSED';
+  routine?: string | null;
+  routine_details?: {
+    id: string;
+    name: string;
+    description?: string;
+    exercises?: RoutineExercise[];
+  } | null;
+}
+
+export interface WorkoutPlan {
+  program: {
+    id: string;
+    name: string;
+    mode?: JourneyMode;
+    mode_label?: string;
+    start_date: string;
+    current_day: number;
+    duration_days: number;
+    start_weight_kg?: number | null;
+    target_weight_kg?: number | null;
+    target_weekly_rate_kg?: number | null;
+  } | null;
+  days: ProgramDay[];
+}
 
 export function resolveDefaultApiUrl(): string {
   // 1. If running on web browser, always target localhost or browser hostname
@@ -350,6 +382,22 @@ class ApiClient {
     } | null;
   }> {
     return this.get('/workouts/sessions/today/');
+  }
+
+  async getWorkoutPlan(): Promise<WorkoutPlan> {
+    return this.get<WorkoutPlan>('/workouts/sessions/plan/');
+  }
+
+  // Archives the active journey (history is kept) and schedules a new one starting today.
+  async startJourney(payload: {
+    mode: JourneyMode;
+    duration_days: number;
+    name?: string;
+    blueprint?: string;
+    start_weight_kg?: number;
+    target_weight_kg?: number;
+  }): Promise<unknown> {
+    return this.post('/workouts/sessions/start-journey/', payload);
   }
 
   async getWorkoutSessions(): Promise<WorkoutSession[]> {

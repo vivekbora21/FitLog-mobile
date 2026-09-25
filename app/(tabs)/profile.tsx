@@ -5,17 +5,50 @@ import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
-import { LogOut, Shield, Server, HardDrive, Building2, Ruler, Scale, Activity, PencilLine, ClipboardCheck, ChevronRight } from 'lucide-react-native';
+import { reloadAppAsync } from 'expo';
+import {
+  LogOut,
+  Shield,
+  Server,
+  HardDrive,
+  Building2,
+  Ruler,
+  Scale,
+  Activity,
+  PencilLine,
+  ClipboardCheck,
+  ChevronRight,
+  CalendarDays,
+  Palette,
+  Sun,
+  Moon,
+  Smartphone,
+} from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { api } from '../../src/api/client';
 import { checkDatabaseHealth } from '../../src/lib/db';
 import { Avatar, Badge, Button, PressableScale, ScreenHeader } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
-import { colors, radius, spacing } from '../../src/theme';
+import { colors, radius, spacing, themePreference, type ThemePreference } from '../../src/theme';
+import { setThemePreference } from '../../src/theme/preference';
 import { humanize } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
 
 const enter = (i: number) => FadeInDown.delay(60 + i * 70).duration(420);
+
+const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof Sun }[] = [
+  { value: 'light', label: 'Light', Icon: Sun },
+  { value: 'dark', label: 'Dark', Icon: Moon },
+  { value: 'system', label: 'System', Icon: Smartphone },
+];
+
+// Every screen's styles are built from the palette at startup, so a theme change reloads the app.
+function changeTheme(value: ThemePreference) {
+  if (value === themePreference) return;
+  haptics.selection();
+  setThemePreference(value);
+  reloadAppAsync('Theme changed').catch((err) => console.error('Failed to reload app:', err));
+}
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -127,6 +160,14 @@ export default function ProfileScreen() {
               onPress={() => router.push('/checkin')}
               right={<ChevronRight size={18} color={colors.textMuted} />}
             />
+            <SettingsRow
+              icon={<CalendarDays size={18} color={colors.cyan} />}
+              iconTint={colors.cyanGlow}
+              title="Workout plan"
+              subtitle="Your program schedule, or choose a new plan"
+              onPress={() => router.push('/plan')}
+              right={<ChevronRight size={18} color={colors.textMuted} />}
+            />
           </View>
         </Animated.View>
 
@@ -154,6 +195,38 @@ export default function ProfileScreen() {
             </View>
           </Animated.View>
         )}
+
+        {/* Appearance */}
+        <Animated.View entering={enter(2)}>
+          <Text style={styles.groupLabel}>Appearance</Text>
+          <View style={styles.group}>
+            <SettingsRow
+              first
+              icon={<Palette size={18} color={colors.primaryLight} />}
+              iconTint={colors.primarySurface}
+              title="Theme"
+              subtitle="Changing the theme restarts the app"
+            />
+            <View style={styles.segment} accessibilityRole="radiogroup">
+              {THEME_OPTIONS.map(({ value, label, Icon }) => {
+                const selected = value === themePreference;
+                return (
+                  <PressableScale
+                    key={value}
+                    onPress={() => changeTheme(value)}
+                    style={[styles.segmentItem, selected && styles.segmentItemSelected]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`${label} theme`}
+                  >
+                    <Icon size={16} color={selected ? colors.primaryLight : colors.textSecondary} />
+                    <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{label}</Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
+          </View>
+        </Animated.View>
 
         {/* System */}
         <Animated.View entering={enter(2)}>
@@ -403,6 +476,36 @@ const styles = StyleSheet.create({
   mono: {
     fontFamily: 'monospace',
     fontSize: 11,
+  },
+  segment: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  segmentItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+  },
+  segmentItemSelected: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.primaryLight,
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  segmentTextSelected: {
+    color: colors.primaryLight,
   },
   statusDotRow: {
     flexDirection: 'row',
