@@ -1,12 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { Utensils, Coffee, Sun, Moon, Cookie, GlassWater, Plus, Trash2, Copy } from 'lucide-react-native';
+import {
+  Utensils,
+  Coffee,
+  Sun,
+  Moon,
+  Cookie,
+  GlassWater,
+  Plus,
+  Trash2,
+  Copy,
+  History,
+  ChevronDown,
+} from 'lucide-react-native';
 import { api, extractErrorMessage } from '../../src/api/client';
 import {
+  Badge,
   Button,
   Card,
   DateNavigator,
@@ -22,8 +35,8 @@ import {
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { formatNumber, calculateMacroPercentage } from '../../src/types';
-import type { MealEntry, NutritionDayResponse } from '../../src/types';
-import { formatDayLabel, isValidDateKey, toDateKey } from '../../src/lib/format';
+import type { MealEntry, NutritionDayResponse, NutritionHistoryDay } from '../../src/types';
+import { formatDayLabel, isValidDateKey, parseDateKey, shiftDateKey, toDateKey } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -57,6 +70,9 @@ export default function NutritionScreen() {
     if (isValidDateKey(params.date)) setDate(params.date);
   }
 
+  const [historyDaysCount, setHistoryDaysCount] = useState(5);
+  const scrollViewRef = useRef<ScrollView>(null);
+
   const queryKey = ['nutritionDay', date];
   const {
     data: nutritionData,
@@ -69,6 +85,16 @@ export default function NutritionScreen() {
   } = useQuery({
     queryKey,
     queryFn: () => api.getNutrition(date),
+    placeholderData: (prev) => prev,
+  });
+
+  const {
+    data: historyData,
+    refetch: refetchHistory,
+    isRefetching: isHistoryRefetching,
+  } = useQuery({
+    queryKey: ['nutritionHistory', historyDaysCount],
+    queryFn: () => api.getNutritionHistory(historyDaysCount),
     placeholderData: (prev) => prev,
   });
 
@@ -148,17 +174,19 @@ export default function NutritionScreen() {
 
   const onRefresh = async () => {
     haptics.light();
-    await refetch();
+    await Promise.all([refetch(), refetchHistory()]);
   };
 
-  const openAddMeal = (mealType?: MealEntry['meal_type']) =>
-    router.push({ pathname: '/meal/add', params: { date, ...(mealType ? { type: mealType } : {}) } });
+  const openAddMeal = (mealType?: MealEntry['meal_type'], targetDate?: string) =>
+    router.push({ pathname: '/meal/add', params: { date: targetDate || date, ...(mealType ? { type: mealType } : {}) } });
 
   const openMeal = (meal: MealEntry) => router.push({ pathname: '/meal/[id]', params: { id: meal.id, date } });
 
   const day = nutritionData?.day;
   const targets = nutritionData?.targets;
   const previousDayMeals = nutritionData?.yesterday_meals ?? [];
+  const todayKey = toDateKey(new Date());
+  const historyDays = historyData?.history ?? [];
 
   const mealGroups = useMemo(() => {
     const meals = day?.meals || [];
@@ -210,6 +238,7 @@ export default function NutritionScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomClearance }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -424,6 +453,62 @@ export default function NutritionScreen() {
             style={styles.addMoreBtn}
           />
         )}
+
+        {/* Daily Nutrition History Stream */}
+        <Animated.View entering={enter(4)}>
+          <View style={styles.historySectionHeader}>
+            <View style={{ flex: 1 }}>
+              <View style={styles.historyTitleRow}>
+                <History size={18} color={colors.primaryLight} />
+                <Text style={styles.sectionTitle}>Daily Nutrition History</Text>
+              </View>
+              <Text style={styles.historySubhead}>
+                Last {historyDaysCount} days · {formatDayLabel(shiftDateKey(todayKey, -(historyDaysCount - 1)))} to Today
+              </Text>
+            </View>
+          </View>
+        </Animated.View>
+
+        {historyDays.map((item, i) => (
+          <Animated.View key={item.date} entering={enter(5 + Math.min(i, 5))}>
+            <NutritionHistoryCard
+              item={item}
+              isSelected={item.date === date}
+              onSelect={() => {
+                haptics.selection();
+                setDate(item.date);
+                scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+              }}
+              onLogMeal={() => openAddMeal(undefined, item.date)}
+            />
+          </Animated.View>
+        ))}
+
+        {/* Load more (10 days at a time) */}
+        <Animated.View entering={enter(5)} style={styles.historyActionsRow}>
+          <Button
+            title="View more history (+10 days)"
+            variant="secondary"
+            icon={<ChevronDown size={16} color={colors.textPrimary} />}
+            iconPosition="right"
+            onPress={() => {
+              haptics.selection();
+              setHistoryDaysCount((c) => c + 10);
+            }}
+            style={{ flex: 1 }}
+          />
+          {historyDaysCount > 5 && (
+            <Button
+              title="Show 5 days"
+              variant="ghost"
+              onPress={() => {
+                haptics.selection();
+                setHistoryDaysCount(5);
+              }}
+              style={{ marginLeft: spacing.xs }}
+            />
+          )}
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -523,6 +608,158 @@ function MacroChip({ letter, value, color }: { letter: string; value: number; co
         {letter} {formatNumber(value)}g
       </Text>
     </View>
+  );
+}
+
+function NutritionHistoryCard({
+  item,
+  isSelected,
+  onSelect,
+  onLogMeal,
+}: {
+  item: NutritionHistoryDay;
+  isSelected: boolean;
+  onSelect: () => void;
+  onLogMeal: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const parsed = parseDateKey(item.date);
+  const dayOfMonth = parsed.getDate();
+  const monthShort = parsed.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+  const weekday = parsed.toLocaleDateString('en-US', { weekday: 'short' });
+  const todayKey = toDateKey(new Date());
+  const isToday = item.date === todayKey;
+  const isYesterday = item.date === shiftDateKey(todayKey, -1);
+
+  const calConsumed = item.total_calories || 0;
+  const calTarget = item.target_calories || 2200;
+  const pct = Math.round((calConsumed / Math.max(1, calTarget)) * 100);
+  const calDiff = calConsumed - calTarget;
+
+  return (
+    <Card elevated style={[styles.historyCard, isSelected && styles.historyCardSelected]}>
+      <PressableScale
+        haptic="selection"
+        scaleTo={0.99}
+        onPress={onSelect}
+        style={styles.historyCardPressable}
+        accessibilityLabel={`Nutrition for ${item.date}. ${calConsumed} of ${calTarget} calories. Tap to view.`}
+      >
+        <View style={styles.historyCardTopRow}>
+          {/* Left Date Tile */}
+          <View style={[styles.historyDateTile, isSelected && styles.historyDateTileActive]}>
+            <Text style={styles.historyDateMonth}>{monthShort}</Text>
+            <Text style={styles.historyDateDay}>{dayOfMonth}</Text>
+            {item.program_day_number ? (
+              <View style={styles.historyProgDayBadge}>
+                <Text style={styles.historyProgDayText}>D{item.program_day_number}</Text>
+              </View>
+            ) : (
+              <Text style={styles.historyDateWeekday}>{weekday}</Text>
+            )}
+          </View>
+
+          {/* Right Header & Adherence Info */}
+          <View style={styles.historyHeaderCol}>
+            <View style={styles.historyHeaderTitleRow}>
+              <Text style={styles.historyDayTitle} numberOfLines={1}>
+                {isToday
+                  ? `Today · ${weekday}, ${dayOfMonth} ${monthShort}`
+                  : isYesterday
+                  ? `Yesterday · ${weekday}, ${dayOfMonth} ${monthShort}`
+                  : `${weekday}, ${dayOfMonth} ${monthShort}`}
+              </Text>
+              {isSelected ? (
+                <Badge label="Viewing" tone="cyan" />
+              ) : !item.has_logged ? (
+                <Badge label="Open Day" tone="slate" />
+              ) : calDiff >= -150 && calDiff <= 150 ? (
+                <Badge label="On Target" tone="emerald" />
+              ) : calDiff > 150 ? (
+                <Badge label={`${formatNumber(calDiff)} kcal over`} tone="amber" />
+              ) : (
+                <Badge label={`${formatNumber(Math.abs(calDiff))} kcal left`} tone="cyan" />
+              )}
+            </View>
+
+            {/* Calories Text and Target Bar */}
+            <View style={styles.historyCalRow}>
+              <Text style={styles.historyCalText}>
+                {formatNumber(calConsumed)}
+                <Text style={styles.historyCalTargetText}> / {formatNumber(calTarget)} kcal</Text>
+              </Text>
+              <Text style={[styles.historyCalPct, pct > 110 && { color: colors.warning }]}>
+                {pct}%
+              </Text>
+            </View>
+            <View style={styles.historyProgressBarBg}>
+              <View
+                style={[
+                  styles.historyProgressBarFill,
+                  {
+                    width: `${Math.min(100, Math.max(0, pct))}%`,
+                    backgroundColor:
+                      pct > 110
+                        ? colors.warning
+                        : pct >= 85
+                        ? colors.primaryLight
+                        : pct > 0
+                        ? colors.cyan
+                        : 'transparent',
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* Content details: macros or empty prompt */}
+        {item.has_logged ? (
+          <View style={styles.historyBody}>
+            <View style={styles.historyMacrosRow}>
+              <View style={styles.historyMacroPill}>
+                <View style={[styles.historyMacroDot, { backgroundColor: colors.cyan }]} />
+                <Text style={styles.historyMacroText}>P: {Math.round(item.total_protein)}g</Text>
+              </View>
+              <View style={styles.historyMacroPill}>
+                <View style={[styles.historyMacroDot, { backgroundColor: colors.amber }]} />
+                <Text style={styles.historyMacroText}>C: {Math.round(item.total_carbs)}g</Text>
+              </View>
+              <View style={styles.historyMacroPill}>
+                <View style={[styles.historyMacroDot, { backgroundColor: colors.violet }]} />
+                <Text style={styles.historyMacroText}>F: {Math.round(item.total_fat)}g</Text>
+              </View>
+              {item.water_consumed_ml > 0 && (
+                <View style={styles.historyMacroPill}>
+                  <View style={[styles.historyMacroDot, { backgroundColor: colors.blue }]} />
+                  <Text style={styles.historyMacroText}>{(item.water_consumed_ml / 1000).toFixed(1)}L</Text>
+                </View>
+              )}
+            </View>
+
+            {item.meals.length > 0 && (
+              <Text style={styles.historyMealsPreview} numberOfLines={1}>
+                {item.meals.map((m) => m.name).join(' · ')}
+              </Text>
+            )}
+          </View>
+        ) : (
+          <View style={styles.historyEmptyRow}>
+            <Text style={styles.historyEmptyText}>No meals or water logged for this day</Text>
+            <PressableScale
+              haptic="selection"
+              onPress={onLogMeal}
+              style={styles.historyLogBtn}
+              accessibilityLabel={`Log food for ${item.date}`}
+            >
+              <Plus size={14} color="#FFFFFF" strokeWidth={2.5} />
+              <Text style={styles.historyLogBtnText}>Log food</Text>
+            </PressableScale>
+          </View>
+        )}
+      </PressableScale>
+    </Card>
   );
 }
 
@@ -830,5 +1067,207 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 16,
     fontWeight: '800',
     color: colors.primaryLight,
+  },
+  historySectionHeader: {
+    marginTop: spacing.xxl,
+    marginBottom: spacing.md,
+  },
+  historyTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+  },
+  historySubhead: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  historyCard: {
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  historyCardSelected: {
+    borderColor: colors.primaryLight,
+    backgroundColor: colors.surfaceElevated,
+  },
+  historyCardPressable: {
+    alignSelf: 'stretch',
+  },
+  historyCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  historyDateTile: {
+    width: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.md,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    marginRight: spacing.md,
+  },
+  historyDateTileActive: {
+    borderColor: colors.primaryLight,
+    backgroundColor: colors.primarySurface,
+  },
+  historyDateMonth: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  historyDateDay: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: colors.textPrimary,
+    letterSpacing: -0.5,
+    lineHeight: 22,
+  },
+  historyProgDayBadge: {
+    marginTop: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: radius.full,
+    backgroundColor: colors.primarySurface,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+  },
+  historyProgDayText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.primaryLight,
+  },
+  historyDateWeekday: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  historyHeaderCol: {
+    flex: 1,
+  },
+  historyHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.xs,
+  },
+  historyDayTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  historyCalRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  historyCalText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  historyCalTargetText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  historyCalPct: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primaryLight,
+  },
+  historyProgressBarBg: {
+    height: 5,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  historyProgressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  historyBody: {
+    marginTop: spacing.xs,
+  },
+  historyMacrosRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.xs + 2,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  historyMacroPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  historyMacroDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  historyMacroText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  historyMealsPreview: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 5,
+    fontStyle: 'italic',
+  },
+  historyEmptyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs + 2,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  historyEmptyText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  historyLogBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 5,
+    borderRadius: radius.md,
+  },
+  historyLogBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  historyActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
   },
 }));

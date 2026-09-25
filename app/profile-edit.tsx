@@ -6,7 +6,7 @@ import { api, extractErrorMessage } from '../src/api/client';
 import { Button, ChipGroup, Input, SheetScreen } from '../src/components/ui';
 import { spacing, makeStyles } from '../src/theme';
 import type { UserProfile } from '../src/types';
-import { parseNumberInput, toDateKey } from '../src/lib/format';
+import { parseNumberInput, toDateKey, calculateAge, formatDobDisplay, isValidDateKey } from '../src/lib/format';
 import { useAuth } from '../src/providers/auth';
 import { invalidateTrackingData } from '../src/lib/queries';
 import { haptics } from '../src/lib/haptics';
@@ -44,6 +44,7 @@ export default function EditProfileScreen() {
 
   const [firstName, setFirstName] = useState(user?.first_name ?? '');
   const [lastName, setLastName] = useState(user?.last_name ?? '');
+  const [dob, setDob] = useState(profile?.date_of_birth ?? '');
   const [sex, setSex] = useState<Sex | null>((profile?.sex as Sex) || null);
   const [weight, setWeight] = useState(profile?.weight_kg != null ? String(profile.weight_kg) : '');
   const [height, setHeight] = useState(profile?.height_cm != null ? String(profile.height_cm) : '');
@@ -54,10 +55,16 @@ export default function EditProfileScreen() {
     mutationFn: async () => {
       const weightVal = parseNumberInput(weight);
       const heightVal = parseNumberInput(height);
+      const cleanDob = dob.trim();
+      if (cleanDob && !isValidDateKey(cleanDob)) {
+        throw new Error('Please enter date of birth as YYYY-MM-DD (e.g. 1998-05-15)');
+      }
+
       await api.updateMe({
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         profile: {
+          date_of_birth: cleanDob || null,
           sex: sex || undefined,
           weight_kg: weightVal,
           height_cm: heightVal,
@@ -88,6 +95,8 @@ export default function EditProfileScreen() {
     },
   });
 
+  const parsedAge = calculateAge(dob.trim());
+
   return (
     <SheetScreen
       title="Edit profile"
@@ -99,6 +108,20 @@ export default function EditProfileScreen() {
         <Input label="First name" value={firstName} onChangeText={setFirstName} containerStyle={styles.half} />
         <Input label="Last name" value={lastName} onChangeText={setLastName} containerStyle={styles.half} />
       </View>
+      <Input
+        label="Date of birth (YYYY-MM-DD)"
+        placeholder="e.g. 1998-05-15"
+        value={dob}
+        onChangeText={setDob}
+        autoCapitalize="none"
+        autoCorrect={false}
+        maxLength={10}
+        hint={
+          dob.trim() && isValidDateKey(dob.trim())
+            ? `${parsedAge != null ? `${parsedAge} years old · ` : ''}Born ${formatDobDisplay(dob.trim())}`
+            : 'Used to calculate age, metabolic rate (BMR) & daily calorie targets'
+        }
+      />
       <ChipGroup
         label="Biological sex (used for BMR & target calories)"
         options={SEX_OPTIONS}

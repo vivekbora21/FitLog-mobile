@@ -58,6 +58,8 @@ export interface Exercise {
   gym_name?: string | null;
   primary_muscle: string;
   primary_muscle_name: string;
+  /** Slug of the primary muscle group; 'cardio' marks a time-based exercise (treadmill, cycling, etc.). */
+  primary_muscle_slug: string;
   secondary_muscles: string[];
   equipment: string;
   equipment_name: string;
@@ -245,6 +247,43 @@ export interface NutritionDayResponse {
   yesterday_meals?: MealEntry[];
 }
 
+export interface NutritionHistoryDay {
+  date: string;
+  program_day_number?: number | null;
+  total_calories: number;
+  total_protein: number;
+  total_carbs: number;
+  total_fat: number;
+  water_consumed_ml: number;
+  meal_count: number;
+  meals: {
+    id: string;
+    name: string;
+    meal_type: MealEntry['meal_type'];
+    calories: number;
+    protein_g: number;
+    carbs_g: number;
+    fat_g: number;
+    servings: number;
+  }[];
+  has_logged: boolean;
+  target_calories: number;
+  target_protein: number;
+  target_carbs: number;
+  target_fat: number;
+  target_water: number;
+}
+
+export interface NutritionHistoryResponse {
+  history: NutritionHistoryDay[];
+  targets: MacroTarget;
+  program?: {
+    start_date?: string | null;
+    duration_days: number;
+    name: string;
+  } | null;
+}
+
 export interface MacroTarget {
   id: string;
   daily_calories: number;
@@ -387,6 +426,30 @@ export interface Notification {
   created_at: string;
 }
 
+export type DayStatus = 'COMPLETED' | 'REST' | 'SKIPPED' | 'UPCOMING';
+
+export interface CalendarDayInfo {
+  date: string;
+  status: DayStatus;
+  has_workout: boolean;
+  sessions_count: number;
+  workout_title?: string | null;
+  duration_min: number;
+  volume_kg: number;
+  exercises_count: number;
+  notes?: string;
+  steps?: number | null;
+  sleep_hours?: number | null;
+  program_day?: {
+    day_number: number;
+    label: string;
+    routine_id?: string | null;
+    routine_name?: string;
+    status: string;
+    is_optional: boolean;
+  } | null;
+}
+
 export interface DashboardStats {
   streak_days: number;
   workouts_this_week: number;
@@ -406,6 +469,7 @@ export interface DashboardStats {
     water_target_ml: number;
   };
   activity_heatmap: Record<string, number>;
+  calendar_days?: Record<string, CalendarDayInfo>;
   pending_assigned_workout?: {
     id: string;
     routine_name: string;
@@ -423,6 +487,7 @@ export interface DashboardStats {
   journey?: {
     mode?: JourneyMode;
     mode_label?: string;
+    start_date?: string | null;
     copilot_insight?: string;
     current_weight?: number | null;
     starting_weight?: number | null;
@@ -651,6 +716,13 @@ export interface JourneyCardioLogEntry {
   target_zone: string;
   completed: boolean;
 }
+
+export type CardioModality = 'TREADMILL' | 'CYCLING' | 'CROSS_TRAINER' | 'ELLIPTICAL' | 'ROWING' | 'OTHER';
+
+/** A logged time-based session (treadmill, cycling, etc.) — backend model CardioEntry. */
+export type CardioEntry = JourneyCardioLogEntry;
+
+export type CardioEntryPayload = Omit<CardioEntry, 'id'>;
 
 export interface JourneyDetailProgram {
   id: string;

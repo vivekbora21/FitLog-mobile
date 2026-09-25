@@ -4,9 +4,13 @@ import { getAccessToken, getRefreshToken, saveTokens, clearTokens, setAccessToke
 import type {
   User,
   DashboardStats,
+  CalendarDayInfo,
+  DayStatus,
   TargetsPayload,
   MacroTarget,
   NutritionDayResponse,
+  NutritionHistoryResponse,
+  NutritionHistoryDay,
   JourneyPacingData,
   WorkoutSession,
   WorkoutSet,
@@ -24,16 +28,19 @@ import type {
   EquipmentType,
   RoutineExercise,
   JourneyMode,
+  CardioEntry,
+  CardioEntryPayload,
 } from '../types';
 
 export type MealType = MealEntry['meal_type'];
+export type { CalendarDayInfo, DayStatus };
 
 export interface ProgramDay {
   id: string;
   day_number: number;
   label: string;
   is_optional: boolean;
-  status: 'UPCOMING' | 'COMPLETED' | 'MISSED';
+  status: 'UPCOMING' | 'COMPLETED' | 'MISSED' | 'REST';
   routine?: string | null;
   routine_details?: {
     id: string;
@@ -448,6 +455,21 @@ class ApiClient {
     return this.get<JourneyPacingData>('/analytics/journey-status/');
   }
 
+  async updateCalendarDayStatus(payload: {
+    date: string;
+    status: 'COMPLETED' | 'REST' | 'SKIPPED' | 'CLEAR';
+    notes?: string;
+  }): Promise<{ success: boolean; date: string; status: string; notes?: string }> {
+    return this.post('/analytics/calendar-day-status/', payload);
+  }
+
+  async updateProgramDay(payload: {
+    day_number: number;
+    status: 'COMPLETED' | 'MISSED' | 'UPCOMING' | 'REST';
+  }): Promise<{ success: boolean; day_number: number; status: string; current_day: number }> {
+    return this.post('/workouts/sessions/update-program-day/', payload);
+  }
+
   // Workouts
   async getTodaysWorkout(): Promise<{
     program?: {
@@ -457,6 +479,7 @@ class ApiClient {
       mode_label: string;
       current_day: number;
       duration_days: number;
+      start_date?: string | null;
     } | null;
     today?: {
       id: string;
@@ -502,6 +525,10 @@ class ApiClient {
   // Nutrition
   async getNutrition(dateStr: string = 'today'): Promise<NutritionDayResponse> {
     return this.get<NutritionDayResponse>(`/nutrition/${dateStr}/`);
+  }
+
+  async getNutritionHistory(days: number = 30): Promise<NutritionHistoryResponse> {
+    return this.get<NutritionHistoryResponse>(`/nutrition-history/?days=${days}`);
   }
 
   async getMacroTargets(): Promise<TargetsPayload> {
@@ -613,6 +640,11 @@ class ApiClient {
 
   async deleteWorkoutSession(id: string): Promise<void> {
     await this.delete(`/workouts/sessions/${id}/`);
+  }
+
+  // Time-based exercises (treadmill, cycling, rowing, etc.) log here instead of as reps/weight sets.
+  async createCardioEntry(entry: CardioEntryPayload): Promise<CardioEntry> {
+    return this.post<CardioEntry>('/workouts/cardio/', entry);
   }
 
   // Daily log (steps / sleep / energy) — POST upserts by date on the server.

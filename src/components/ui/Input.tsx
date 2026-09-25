@@ -11,6 +11,7 @@ import { radius, spacing, makeStyles, useTheme } from '../../theme';
 interface InputProps extends TextInputProps {
   label?: string;
   error?: string;
+  hint?: string;
   containerStyle?: ViewStyle;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
@@ -20,6 +21,7 @@ interface InputProps extends TextInputProps {
 export function Input({
   label,
   error,
+  hint,
   containerStyle,
   leftIcon,
   rightIcon,
@@ -63,16 +65,24 @@ export function Input({
         />
         {rightIcon && <View style={styles.iconContainer}>{rightIcon}</View>}
       </View>
-      {error && (
+      {error ? (
         <Text style={styles.errorText} accessibilityLiveRegion="polite">
           {error}
         </Text>
-      )}
+      ) : hint ? (
+        <Text style={styles.hintText}>{hint}</Text>
+      ) : null}
     </View>
   );
 }
 
 const useStyles = makeStyles(({ colors }) => ({
+  hintText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: spacing.xs,
+    marginLeft: 2,
+  },
   container: {
     marginBottom: spacing.lg,
   },

@@ -13,6 +13,8 @@ export interface PickedExercise {
   id: string;
   name: string;
   muscle?: string;
+  /** Primary muscle slug; 'cardio' marks a time-based exercise (treadmill, cycling, etc.). */
+  muscleSlug?: string;
 }
 
 interface Props {
@@ -27,6 +29,7 @@ interface Row {
   id: string;
   name: string;
   muscle?: string;
+  muscleSlug?: string;
   meta?: string;
   custom?: boolean;
 }
@@ -72,6 +75,7 @@ export function ExercisePicker({ visible, onClose, onPick, selectedIds }: Props)
         id: e.id,
         name: e.name,
         muscle: e.primary_muscle_name,
+        muscleSlug: e.primary_muscle_slug,
         meta: [e.primary_muscle_name, e.equipment_name].filter(Boolean).join(' · '),
         custom: e.is_custom,
       }));
@@ -143,7 +147,7 @@ export function ExercisePicker({ visible, onClose, onPick, selectedIds }: Props)
                 return (
                   <PressableScale
                     haptic="none"
-                    onPress={() => pick({ id: item.id, name: item.name, muscle: item.muscle })}
+                    onPress={() => pick({ id: item.id, name: item.name, muscle: item.muscle, muscleSlug: item.muscleSlug })}
                     style={styles.row}
                     accessibilityLabel={`Add ${item.name}${added ? ', already in workout' : ''}`}
                   >
@@ -151,6 +155,7 @@ export function ExercisePicker({ visible, onClose, onPick, selectedIds }: Props)
                       <Text style={styles.rowName}>
                         {item.name}
                         {item.custom ? <Text style={styles.customTag}>  Custom</Text> : null}
+                        {item.muscleSlug === 'cardio' ? <Text style={styles.cardioTag}>  Cardio</Text> : null}
                       </Text>
                       {item.meta ? <Text style={styles.rowMeta}>{item.meta}</Text> : null}
                     </View>
@@ -206,7 +211,7 @@ function CreateExerciseForm({ initialName, onCreated }: { initialName: string; o
     onSuccess: (e) => {
       haptics.success();
       queryClient.invalidateQueries({ queryKey: ['exerciseSearch'] });
-      onCreated({ id: e.id, name: e.name, muscle: e.primary_muscle_name });
+      onCreated({ id: e.id, name: e.name, muscle: e.primary_muscle_name, muscleSlug: e.primary_muscle_slug });
     },
     onError: () => haptics.error(),
   });
@@ -337,6 +342,11 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 11,
     fontWeight: '700',
     color: colors.violet,
+  },
+  cardioTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.amber,
   },
   rowMeta: {
     fontSize: 12,

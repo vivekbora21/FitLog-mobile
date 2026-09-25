@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, ViewStyle, ViewProps } from 'react-native';
+import { View, ViewStyle, ViewProps, StyleProp } from 'react-native';
 import { PressableScale } from './PressableScale';
 import { radius, spacing, makeStyles } from '../../theme';
 
@@ -9,7 +9,7 @@ interface CardProps extends ViewProps {
   /** Makes the whole card tappable with spring + haptic feedback. */
   onPress?: () => void;
   accessibilityHint?: string;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   children: React.ReactNode;
 }
 

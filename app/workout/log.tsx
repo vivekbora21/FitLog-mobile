@@ -2,11 +2,20 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, Alert, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, Pencil, Plus } from 'lucide-react-native';
+import { Clock, Pencil, Plus, Sparkles } from 'lucide-react-native';
 import { api, extractErrorMessage, type WorkoutSessionPayload } from '../../src/api/client';
-import { Button, DateNavigator, Input, PressableScale, SheetScreen, useToast } from '../../src/components/ui';
+import { Button, Card, DateNavigator, Input, PressableScale, SheetScreen, useToast } from '../../src/components/ui';
 import { makeStyles, radius, spacing, useTheme } from '../../src/theme';
-import { formatRelativeDay, formatVolume, isValidDateKey, parseDateKey, parseNumberInput, toDateKey } from '../../src/lib/format';
+import {
+  formatRelativeDay,
+  formatVolume,
+  getDateProgramDayNumber,
+  isValidDateKey,
+  parseDateKey,
+  parseNumberInput,
+  shiftDateKey,
+  toDateKey,
+} from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
 import {
@@ -21,9 +30,12 @@ import {
   type DraftExercise,
   type WorkoutDraft,
 } from '../../src/features/workout/draft';
+import { CardioLogModal } from '../../src/features/workout/CardioLogModal';
 import { ExerciseCard } from '../../src/features/workout/ExerciseCard';
 import { ExercisePicker } from '../../src/features/workout/ExercisePicker';
+import { RoutinePicker } from '../../src/features/workout/RoutinePicker';
 import { RestTimerBar, formatClock, useNow, useRestTimer } from '../../src/features/workout/RestTimer';
+import type { WorkoutSession } from '../../src/types';
 
 const loggedReps = (reps: string) => (parseNumberInput(reps) ?? 0) > 0;
 
@@ -33,7 +45,14 @@ export default function LogWorkoutScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const params = useLocalSearchParams<{ plan?: string; date?: string; edit?: string; resume?: string }>();
+  const params = useLocalSearchParams<{
+    plan?: string;
+    date?: string;
+    edit?: string;
+    resume?: string;
+    routineId?: string;
+    planDay?: string;
+  }>();
   const editId = params.edit || null;
   const usePlan = params.plan === '1' && !editId;
   const todayKey = toDateKey(new Date());
@@ -48,11 +67,13 @@ export default function LogWorkoutScreen() {
   const [title, setTitle] = useState(initial?.title ?? '');
   const [notes, setNotes] = useState(initial?.notes ?? '');
   const [duration, setDuration] = useState(initial?.duration ?? '45');
-  const [live, setLive] = useState(initial?.live ?? !editId);
+  const [live, setLive] = useState(initial?.live ?? (!editId && (params.date ? params.date === todayKey : true)));
   const [startedAt, setStartedAt] = useState(() => initial?.startedAt ?? Date.now());
-  const [routineId, setRoutineId] = useState<string | null>(initial?.routineId ?? null);
+  const [routineId, setRoutineId] = useState<string | null>(initial?.routineId ?? params.routineId ?? null);
   const [exercises, setExercises] = useState<DraftExercise[]>(initial?.exercises ?? []);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [routinePickerOpen, setRoutinePickerOpen] = useState(false);
+  const [cardioExercise, setCardioExercise] = useState<string | null>(null);
   // New workouts wait here until a saved draft has been resumed or discarded.
   const [ready, setReady] = useState(!!editId || !hasDraft || resumeNow);
   const [prefilled, setPrefilled] = useState(resumeNow);
@@ -94,6 +115,11 @@ export default function LogWorkoutScreen() {
     );
   }, [savedDraft, hasDraft, resumeNow]);
 
+  const planQuery = useQuery({
+    queryKey: ['workoutPlan'],
+    queryFn: () => api.getWorkoutPlan(),
+  });
+
   const todayQuery = useQuery({
     queryKey: ['todaysWorkout'],
     queryFn: () => api.getTodaysWorkout(),
@@ -101,6 +127,7 @@ export default function LogWorkoutScreen() {
   });
   const planDay = todayQuery.data?.today;
   const routine = planDay?.routine_details;
+  const program = planQuery.data?.program || todayQuery.data?.program;
 
   const sessionQuery = useQuery({
     queryKey: ['workoutSession', editId],
@@ -109,10 +136,19 @@ export default function LogWorkoutScreen() {
   });
   const session = sessionQuery.data;
 
-  // 2. One-time prefill from today's plan or from the session being edited
-  //    (state adjusted during render once the data arrives, not in an effect).
+  // 2. One-time prefill from plan, routineId param, or from the session being edited
   if (!prefilled && ready) {
-    if (usePlan && routine) {
+    if (params.routineId && planQuery.data?.days) {
+      const matchDay = planQuery.data.days.find(
+        (d) => d.routine === params.routineId || d.routine_details?.id === params.routineId
+      );
+      if (matchDay?.routine_details) {
+        setPrefilled(true);
+        setTitle(matchDay.routine_details.name || matchDay.label || 'Workout');
+        setExercises((matchDay.routine_details.exercises ?? []).map(exerciseFromRoutine));
+        setRoutineId(matchDay.routine_details.id);
+      }
+    } else if (usePlan && routine) {
       setPrefilled(true);
       setTitle(routine.name || planDay?.label || 'Workout');
       setExercises((routine.exercises ?? []).map(exerciseFromRoutine));
@@ -150,6 +186,25 @@ export default function LogWorkoutScreen() {
 
   const restTimer = useRestTimer();
 
+  const handleLoadRoutine = (r: { id: string; name: string; exercises?: any[] }) => {
+    setTitle(r.name);
+    setRoutineId(r.id);
+    if (r.exercises && r.exercises.length > 0) {
+      setExercises(r.exercises.map(exerciseFromRoutine));
+    }
+    toast({ message: `Loaded routine "${r.name}"` });
+  };
+
+  const handleCopySession = (s: WorkoutSession) => {
+    setTitle(s.title || 'Workout Session');
+    if (s.routine) {
+      setRoutineId(s.routine);
+    }
+    const exs = exercisesFromSession(s);
+    setExercises(exs);
+    toast({ message: `Copied ${exs.length} exercises from past session` });
+  };
+
   const updateExercise = (key: string, fn: (ex: DraftExercise) => DraftExercise) =>
     setExercises((list) => list.map((ex) => (ex.key === key ? fn(ex) : ex)));
 
@@ -162,8 +217,8 @@ export default function LogWorkoutScreen() {
       return next;
     });
 
-  // Only a session logged today can complete today's plan day; the server advances the program on save.
-  const linkRoutine = !editId && isToday ? routineId : null;
+  // Links routine so program advances regardless of whether logged today or backdated.
+  const linkRoutine = !editId ? routineId : null;
 
   const loggedSets = exercises.flatMap((ex) => ex.sets.filter((s) => loggedReps(s.reps)));
   const volume = exercises.reduce(
@@ -361,6 +416,63 @@ export default function LogWorkoutScreen() {
         </View>
       )}
 
+      {/* Quick date shortcuts */}
+      <View style={styles.quickDateRow}>
+        {[
+          { label: 'Today', key: todayKey },
+          { label: 'Yesterday', key: shiftDateKey(todayKey, -1) },
+          { label: '2d ago', key: shiftDateKey(todayKey, -2) },
+          { label: '3d ago', key: shiftDateKey(todayKey, -3) },
+        ].map((item) => {
+          const isSelected = date === item.key;
+          const dObj = parseDateKey(item.key);
+          const dateStr = dObj.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+          const pillProgDay = getDateProgramDayNumber(
+            program?.start_date,
+            item.key,
+            program?.duration_days
+          );
+          return (
+            <PressableScale
+              key={item.key}
+              haptic="selection"
+              onPress={() => {
+                setDate(item.key);
+                if (item.key !== todayKey) {
+                  setLive(false);
+                }
+              }}
+              style={[styles.quickDatePill, isSelected && styles.quickDatePillActive]}
+            >
+              <Text style={[styles.quickDateText, isSelected && styles.quickDateTextActive]}>
+                {item.label}
+              </Text>
+              <Text style={[styles.quickDateSubtext, isSelected && styles.quickDateSubtextActive]}>
+                {pillProgDay ? `D${pillProgDay} · ` : ''}{dateStr}
+              </Text>
+            </PressableScale>
+          );
+        })}
+      </View>
+
+      {!isToday && (
+        <View style={styles.pastDateBanner}>
+          <Clock size={14} color={colors.amber} />
+          <Text style={styles.pastDateBannerText}>
+            Logging past workout: {(() => {
+              const progDayNum = getDateProgramDayNumber(
+                program?.start_date,
+                date,
+                program?.duration_days
+              );
+              const dObj = parseDateKey(date);
+              const formattedDate = dObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+              return `${progDayNum ? `Day ${progDayNum} · ` : ''}${formatRelativeDay(dObj.toISOString())} (${formattedDate})`;
+            })()}
+          </Text>
+        </View>
+      )}
+
       <DateNavigator date={date} onChange={setDate} />
 
       <Input label="Workout name" placeholder="e.g. Push day" value={title} onChangeText={setTitle} />
@@ -397,17 +509,51 @@ export default function LogWorkoutScreen() {
       ))}
 
       {exercises.length === 0 && (
-        <Text style={styles.emptyHint}>Add your first exercise to start logging sets.</Text>
+        <Card elevated style={styles.emptyCard}>
+          <Text style={styles.emptyCardTitle}>No exercises added</Text>
+          <Text style={styles.emptyCardDesc}>
+            Load a scheduled routine from your plan, pick from your routines, or add exercises manually.
+          </Text>
+          <View style={styles.emptyCardActions}>
+            <Button
+              title="Load routine / plan"
+              icon={<Sparkles size={16} color="#FFFFFF" />}
+              iconPosition="left"
+              onPress={() => setRoutinePickerOpen(true)}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Add exercise"
+              variant="outline"
+              icon={<Plus size={16} color={colors.primaryLight} />}
+              iconPosition="left"
+              onPress={() => setPickerOpen(true)}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </Card>
       )}
 
-      <Button
-        title="Add exercise"
-        variant="outline"
-        icon={<Plus size={18} color={colors.primaryLight} />}
-        iconPosition="left"
-        onPress={() => setPickerOpen(true)}
-        style={styles.addExerciseBtn}
-      />
+      {exercises.length > 0 && (
+        <View style={styles.exerciseActionRow}>
+          <Button
+            title="Add exercise"
+            variant="outline"
+            icon={<Plus size={18} color={colors.primaryLight} />}
+            iconPosition="left"
+            onPress={() => setPickerOpen(true)}
+            style={{ flex: 1 }}
+          />
+          <Button
+            title="Load routine"
+            variant="secondary"
+            icon={<Sparkles size={16} color={colors.cyan} />}
+            iconPosition="left"
+            onPress={() => setRoutinePickerOpen(true)}
+            style={{ flex: 1 }}
+          />
+        </View>
+      )}
 
       <Input
         label="Notes"
@@ -425,10 +571,35 @@ export default function LogWorkoutScreen() {
         onClose={() => setPickerOpen(false)}
         onPick={(e) => {
           setPickerOpen(false);
+          // Time-based exercises (treadmill, cycling, etc.) have no reps/weight to log —
+          // they're logged as a cardio session instead of added as a set-tracking row.
+          if (e.muscleSlug === 'cardio') {
+            setCardioExercise(e.name);
+            return;
+          }
           setExercises((list) => [
             ...list,
             { key: nextKey(), exerciseId: e.id, name: e.name, muscle: e.muscle, restSeconds: 90, sets: [newSet(), newSet(), newSet()] },
           ]);
+        }}
+      />
+
+      <RoutinePicker
+        visible={routinePickerOpen}
+        onClose={() => setRoutinePickerOpen(false)}
+        onSelectRoutine={handleLoadRoutine}
+        onSelectSession={handleCopySession}
+        activeRoutineId={routineId}
+      />
+
+      <CardioLogModal
+        visible={cardioExercise !== null}
+        date={date}
+        exerciseName={cardioExercise ?? undefined}
+        onClose={() => setCardioExercise(null)}
+        onSaved={() => {
+          setCardioExercise(null);
+          toast({ message: 'Cardio session logged' });
         }}
       />
     </SheetScreen>
@@ -512,5 +683,84 @@ const useStyles = makeStyles(({ colors }) => ({
   errorText: {
     fontSize: 14,
     color: colors.error,
+  },
+  quickDateRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  quickDatePill: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickDatePillActive: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.primaryLight,
+  },
+  quickDateText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  quickDateTextActive: {
+    color: colors.primaryLight,
+    fontWeight: '800',
+  },
+  quickDateSubtext: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  quickDateSubtextActive: {
+    color: colors.primaryLight,
+  },
+  pastDateBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(217, 119, 6, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(217, 119, 6, 0.3)',
+    marginBottom: spacing.sm,
+  },
+  pastDateBannerText: {
+    fontSize: 12,
+    color: colors.amber,
+    fontWeight: '600',
+  },
+  emptyCard: {
+    padding: spacing.md,
+    gap: spacing.xs,
+    marginVertical: spacing.md,
+  },
+  emptyCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  emptyCardDesc: {
+    fontSize: 12,
+    color: colors.textMuted,
+    lineHeight: 17,
+  },
+  emptyCardActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  exerciseActionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
   },
 }));

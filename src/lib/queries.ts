@@ -6,6 +6,7 @@ export function invalidateTrackingData(queryClient: QueryClient) {
   return Promise.all(
     [
       'nutritionDay',
+      'nutritionHistory',
       'dashboardStats',
       'dailyLog',
       'workoutSessions',

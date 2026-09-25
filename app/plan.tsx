@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
@@ -11,6 +11,10 @@ import {
   Dumbbell,
   Flag,
   SlidersHorizontal,
+  Check,
+  Moon,
+  FastForward,
+  RotateCcw,
 } from 'lucide-react-native';
 import { api, extractErrorMessage, type ProgramDay } from '../src/api/client';
 import {
@@ -24,10 +28,12 @@ import {
   ScreenSkeleton,
 } from '../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../src/theme';
+import { getProgramDayDate, toDateKey } from '../src/lib/format';
 import { haptics } from '../src/lib/haptics';
 import type { RoutineExercise } from '../src/types';
 
-const DAY_CHIP = 44;
+const DAY_CHIP_WIDTH = 58;
+const DAY_CHIP_HEIGHT = 52;
 const DAY_GAP = spacing.sm;
 const enter = (i: number) => FadeInDown.delay(60 + i * 60).duration(420);
 
@@ -38,7 +44,8 @@ function plannedLoad(ex: RoutineExercise) {
 
 function dayTone(day: ProgramDay, currentDay: number) {
   if (day.status === 'COMPLETED') return { label: 'Completed', tone: 'emerald' as const };
-  if (day.status === 'MISSED') return { label: 'Resume', tone: 'amber' as const };
+  if (day.status === 'REST') return { label: 'Rest Day', tone: 'cyan' as const };
+  if (day.status === 'MISSED') return { label: 'Skipped', tone: 'amber' as const };
   if (day.day_number === currentDay) return { label: 'Today', tone: 'cyan' as const };
   return { label: 'Upcoming', tone: 'slate' as const };
 }
@@ -52,6 +59,7 @@ export default function PlanScreen() {
     queryFn: () => api.getWorkoutPlan(),
   });
 
+  const queryClient = useQueryClient();
   const program = data?.program ?? null;
   const days = data?.days ?? [];
   const currentDay = program?.current_day ?? 1;
@@ -63,11 +71,43 @@ export default function PlanScreen() {
   const completed = days.filter((d) => d.status === 'COMPLETED').length;
   const duration = program?.duration_days ?? days.length;
 
+  const statusMutation = useMutation({
+    mutationFn: (newStatus: 'COMPLETED' | 'MISSED' | 'UPCOMING' | 'REST') =>
+      api.updateProgramDay({ day_number: shownDay, status: newStatus }),
+    onSuccess: () => {
+      haptics.success();
+      queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
+      queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+    },
+    onError: (err) => {
+      haptics.error();
+      Alert.alert("Couldn't update plan day", extractErrorMessage(err));
+    },
+  });
+
+  const planDayDate = useMemo(() => {
+    if (!program?.start_date) return null;
+    const parts = program.start_date.split('-');
+    if (parts.length !== 3) return null;
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    d.setDate(d.getDate() + (shownDay - 1));
+    return toDateKey(d);
+  }, [program?.start_date, shownDay]);
+
+  const selectedDayDate = useMemo(() => {
+    return getProgramDayDate(program?.start_date, shownDay);
+  }, [program?.start_date, shownDay]);
+
+  const currentDayDate = useMemo(() => {
+    return getProgramDayDate(program?.start_date, currentDay);
+  }, [program?.start_date, currentDay]);
+
   // Keep the selected day visible in the strip.
   const stripRef = useRef<ScrollView>(null);
   useEffect(() => {
     if (!program) return;
-    const x = Math.max(0, (shownDay - 3) * (DAY_CHIP + DAY_GAP));
+    const x = Math.max(0, (shownDay - 3) * (DAY_CHIP_WIDTH + DAY_GAP));
     stripRef.current?.scrollTo({ x, animated: selectedDay !== null });
   }, [shownDay, program, selectedDay]);
 
@@ -157,7 +197,10 @@ export default function PlanScreen() {
               <Card elevated style={styles.overviewCard}>
                 <View style={styles.overviewRow}>
                   <Text style={styles.overviewStrong}>Day {currentDay} of {duration}</Text>
-                  <Text style={styles.overviewMuted}>{completed} completed</Text>
+                  <Text style={styles.overviewMuted}>
+                    {currentDayDate ? `${currentDayDate.formattedShort} · ` : ''}
+                    {completed} completed
+                  </Text>
                 </View>
                 <ProgressBar percentage={(completed / Math.max(duration, 1)) * 100} height={8} />
                 <View style={styles.metaRow}>
@@ -188,7 +231,11 @@ export default function PlanScreen() {
                 {days.map((d) => {
                   const selected = d.day_number === shownDay;
                   const done = d.status === 'COMPLETED';
+                  const isRest = d.status === 'REST';
+                  const isMissed = d.status === 'MISSED';
                   const isToday = d.day_number === currentDay;
+                  const dayDate = getProgramDayDate(program?.start_date, d.day_number);
+
                   return (
                     <PressableScale
                       key={d.id}
@@ -196,16 +243,34 @@ export default function PlanScreen() {
                       style={[
                         styles.dayChip,
                         done && styles.dayChipDone,
+                        isRest && styles.dayChipRest,
+                        isMissed && styles.dayChipMissed,
                         isToday && styles.dayChipToday,
-                        d.is_optional && !done && styles.dayChipOptional,
+                        d.is_optional && !done && !isRest && styles.dayChipOptional,
                         selected && styles.dayChipSelected,
                       ]}
                       accessibilityLabel={`Day ${d.day_number}: ${d.label}`}
                       accessibilityState={{ selected }}
                     >
-                      <Text style={[styles.dayChipText, (done || selected) && styles.dayChipTextStrong]}>
+                      <Text
+                        style={[
+                          styles.dayChipNumber,
+                          (done || isRest || isMissed || selected) && styles.dayChipTextStrong,
+                        ]}
+                      >
                         {d.day_number}
                       </Text>
+                      {dayDate ? (
+                        <Text
+                          style={[
+                            styles.dayChipDate,
+                            (done || isRest || isMissed || selected) && styles.dayChipDateStrong,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {dayDate.formattedShort}
+                        </Text>
+                      ) : null}
                     </PressableScale>
                   );
                 })}
@@ -250,9 +315,21 @@ export default function PlanScreen() {
                       tone={dayTone(day, currentDay).tone}
                     />
                   ) : null}
-                  <Text style={styles.dayNumber}>Day {shownDay}</Text>
+                  <Text style={styles.dayNumber}>
+                    Day {shownDay}
+                    {selectedDayDate ? ` · ${selectedDayDate.formattedFull}` : ''}
+                  </Text>
                 </View>
                 <Text style={styles.dayTitle}>{day?.label || routine?.name || 'Plan day unavailable'}</Text>
+                {selectedDayDate ? (
+                  <View style={styles.datePillRow}>
+                    <CalendarDays size={13} color={colors.primaryLight} />
+                    <Text style={styles.datePillText}>
+                      Calendar Date: {selectedDayDate.formattedFull}
+                      {shownDay === currentDay ? ' (Today)' : ''}
+                    </Text>
+                  </View>
+                ) : null}
                 <Text style={styles.dayDesc}>
                   {routine?.description || (routine ? '' : 'Rest & recovery — no lifting scheduled.')}
                 </Text>
@@ -279,12 +356,100 @@ export default function PlanScreen() {
                   );
                 })}
 
-                {shownDay === currentDay && day?.status !== 'COMPLETED' && exercises.length > 0 ? (
+                {/* 1-tap quick status selector */}
+                <View style={styles.statusRow}>
+                  <PressableScale
+                    style={[
+                      styles.statusBtn,
+                      day?.status === 'COMPLETED' && styles.statusBtnActiveDone,
+                    ]}
+                    onPress={() => statusMutation.mutate('COMPLETED')}
+                    disabled={statusMutation.isPending}
+                  >
+                    <Check
+                      size={14}
+                      color={day?.status === 'COMPLETED' ? colors.primaryLight : colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.statusBtnText,
+                        day?.status === 'COMPLETED' && { color: colors.primaryLight },
+                      ]}
+                    >
+                      Done
+                    </Text>
+                  </PressableScale>
+
+                  <PressableScale
+                    style={[
+                      styles.statusBtn,
+                      day?.status === 'REST' && styles.statusBtnActiveRest,
+                    ]}
+                    onPress={() => statusMutation.mutate('REST')}
+                    disabled={statusMutation.isPending}
+                  >
+                    <Moon
+                      size={14}
+                      color={day?.status === 'REST' ? colors.cyan : colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.statusBtnText,
+                        day?.status === 'REST' && { color: colors.cyan },
+                      ]}
+                    >
+                      Rest
+                    </Text>
+                  </PressableScale>
+
+                  <PressableScale
+                    style={[
+                      styles.statusBtn,
+                      day?.status === 'MISSED' && styles.statusBtnActiveSkip,
+                    ]}
+                    onPress={() => statusMutation.mutate('MISSED')}
+                    disabled={statusMutation.isPending}
+                  >
+                    <FastForward
+                      size={14}
+                      color={day?.status === 'MISSED' ? colors.warning : colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.statusBtnText,
+                        day?.status === 'MISSED' && { color: colors.warning },
+                      ]}
+                    >
+                      Skip
+                    </Text>
+                  </PressableScale>
+
+                  {day?.status && day.status !== 'UPCOMING' && (
+                    <PressableScale
+                      style={[styles.statusBtn, { flex: 0.6 }]}
+                      onPress={() => statusMutation.mutate('UPCOMING')}
+                      disabled={statusMutation.isPending}
+                    >
+                      <RotateCcw size={13} color={colors.textMuted} />
+                    </PressableScale>
+                  )}
+                </View>
+
+                {exercises.length > 0 ? (
                   <Button
-                    title="Start & log this workout"
+                    title={day?.status === 'COMPLETED' ? 'Log this workout again' : 'Start & log this workout'}
                     icon={<Dumbbell size={18} color="#FFFFFF" />}
                     iconPosition="left"
-                    onPress={() => router.push({ pathname: '/workout/log', params: { plan: '1' } })}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/workout/log',
+                        params: {
+                          plan: '1',
+                          routineId: routine?.id,
+                          date: planDayDate || undefined,
+                        },
+                      })
+                    }
                     style={styles.dayAction}
                   />
                 ) : null}
@@ -394,18 +559,55 @@ const useStyles = makeStyles(({ colors }) => ({
     paddingVertical: spacing.lg,
   },
   dayChip: {
-    width: DAY_CHIP,
-    height: DAY_CHIP,
+    width: DAY_CHIP_WIDTH,
+    height: DAY_CHIP_HEIGHT,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
     borderWidth: 1.5,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 3,
+  },
+  dayChipNumber: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  dayChipDate: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  dayChipDateStrong: {
+    color: colors.textPrimary,
+  },
+  datePillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    marginBottom: spacing.xs,
+  },
+  datePillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryLight,
   },
   dayChipDone: {
     backgroundColor: colors.primarySurface,
     borderColor: colors.borderGlow,
+  },
+  dayChipRest: {
+    backgroundColor: colors.cyanGlow,
+    borderColor: colors.cyan,
+  },
+  dayChipMissed: {
+    backgroundColor: colors.amberGlow,
+    borderColor: colors.warning,
   },
   dayChipToday: {
     borderColor: colors.cyan,
@@ -529,6 +731,41 @@ const useStyles = makeStyles(({ colors }) => ({
   },
   dayAction: {
     marginTop: spacing.md,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  statusBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  statusBtnActiveDone: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.borderGlow,
+  },
+  statusBtnActiveRest: {
+    backgroundColor: colors.cyanGlow,
+    borderColor: colors.cyan,
+  },
+  statusBtnActiveSkip: {
+    backgroundColor: colors.amberGlow,
+    borderColor: colors.warning,
+  },
+  statusBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   footnote: {
     fontSize: 12,

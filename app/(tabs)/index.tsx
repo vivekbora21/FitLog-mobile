@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, ScrollView, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -31,6 +31,8 @@ import {
   ScreenSkeleton,
   ErrorState,
   Stepper,
+  WeekCalendar,
+  DayActionModal,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
@@ -90,7 +92,11 @@ export default function DashboardScreen() {
     },
   });
 
-  const openDay = (key: string) => router.navigate({ pathname: '/(tabs)/nutrition', params: { date: key } });
+  const [activeDayModal, setActiveDayModal] = useState<string | null>(null);
+
+  const openDay = (key: string) => {
+    setActiveDayModal(key);
+  };
 
   if (isStatsLoading && !stats) {
     return (
@@ -216,50 +222,15 @@ export default function DashboardScreen() {
 
         {/* Week strip */}
         <Animated.View entering={enter(0)}>
-          <Card style={styles.weekCard}>
-            <View style={styles.weekHeader}>
-              <Text style={styles.weekTitle}>This week</Text>
-              <Text style={styles.weekCount}>
-                <Text style={styles.weekCountStrong}>{workoutsThisWeek}</Text> / {weeklyTarget} workouts
-              </Text>
-            </View>
-            <View style={styles.weekRow}>
-              {weekDays.map((d) => {
-                const key = toDateKey(d);
-                const active = (heatmap[key] || 0) > 0;
-                const isToday = key === todayKey;
-                return (
-                  <PressableScale
-                    key={key}
-                    haptic="selection"
-                    onPress={() => openDay(key)}
-                    style={styles.dayCol}
-                    accessibilityLabel={`${d.toLocaleDateString('en-US', { weekday: 'long' })}: ${
-                      active ? 'trained' : 'no workout'
-                    }`}
-                    accessibilityHint="Opens that day's log"
-                  >
-                    <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>
-                      {d.toLocaleDateString('en-US', { weekday: 'narrow' })}
-                    </Text>
-                    <View
-                      style={[
-                        styles.dayDot,
-                        active && styles.dayDotActive,
-                        isToday && !active && styles.dayDotToday,
-                      ]}
-                    >
-                      {active ? (
-                        <Check size={14} color={colors.textInverse} strokeWidth={3} />
-                      ) : (
-                        <Text style={[styles.dayNum, isToday && styles.dayNumToday]}>{d.getDate()}</Text>
-                      )}
-                    </View>
-                  </PressableScale>
-                );
-              })}
-            </View>
-          </Card>
+          <WeekCalendar
+            selectedDate={activeDayModal || todayKey}
+            onSelectDate={(key) => setActiveDayModal(key)}
+            onOpenDayModal={(key) => setActiveDayModal(key)}
+            calendarDays={stats?.calendar_days}
+            heatmap={heatmap}
+            workoutsThisWeek={workoutsThisWeek}
+            weeklyTarget={weeklyTarget}
+          />
         </Animated.View>
 
         {/* Quick actions */}
@@ -535,6 +506,15 @@ export default function DashboardScreen() {
           </Animated.View>
         )}
       </ScrollView>
+
+      {activeDayModal && (
+        <DayActionModal
+          visible={!!activeDayModal}
+          dateKey={activeDayModal}
+          dayInfo={stats?.calendar_days ? stats.calendar_days[activeDayModal] : null}
+          onClose={() => setActiveDayModal(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }

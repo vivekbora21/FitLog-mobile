@@ -106,3 +106,58 @@ export function parseNumberInput(value: string): number | null {
   const n = parseFloat(value.replace(',', '.'));
   return isNaN(n) ? null : n;
 }
+
+export interface ProgramDayDateInfo {
+  dateKey: string;
+  formattedShort: string; // e.g. "10 Sep"
+  formattedFull: string;  // e.g. "Wed, 10 Sep"
+  weekday: string;        // e.g. "Wed"
+  dayOfMonth: number;     // e.g. 10
+  monthShort: string;     // e.g. "Sep"
+}
+
+/** Given program start date (YYYY-MM-DD) and a day number (1-indexed), returns date details */
+export function getProgramDayDate(startDateStr: string | null | undefined, dayNumber: number): ProgramDayDateInfo | null {
+  if (!startDateStr || !isValidDateKey(startDateStr) || !dayNumber || dayNumber < 1) return null;
+  const d = parseDateKey(startDateStr);
+  d.setDate(d.getDate() + (dayNumber - 1));
+  const dateKey = toDateKey(d);
+  const formattedShort = d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+  const formattedFull = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+  const weekday = d.toLocaleDateString('en-US', { weekday: 'short' });
+  const dayOfMonth = d.getDate();
+  const monthShort = d.toLocaleDateString('en-US', { month: 'short' });
+  return { dateKey, formattedShort, formattedFull, weekday, dayOfMonth, monthShort };
+}
+
+/** Given a date key and program start date, returns the program day number (1-indexed) if within duration */
+export function getDateProgramDayNumber(startDateStr: string | null | undefined, dateKey: string, durationDays: number = 30): number | null {
+  if (!startDateStr || !isValidDateKey(startDateStr) || !isValidDateKey(dateKey)) return null;
+  const start = parseDateKey(startDateStr);
+  const target = parseDateKey(dateKey);
+  const diffDays = Math.round((target.getTime() - start.getTime()) / 86_400_000);
+  const dayNum = diffDays + 1;
+  if (dayNum >= 1 && dayNum <= durationDays) return dayNum;
+  return null;
+}
+
+/** Calculates age in years from YYYY-MM-DD string */
+export function calculateAge(dobStr?: string | null): number | null {
+  if (!dobStr || !isValidDateKey(dobStr)) return null;
+  const [y, m, d] = dobStr.split('-').map(Number);
+  const birthDate = new Date(y, (m || 1) - 1, d || 1);
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age >= 0 && age < 130 ? age : null;
+}
+
+/** Formats YYYY-MM-DD into "15 May 1998" */
+export function formatDobDisplay(dobStr?: string | null): string {
+  if (!dobStr || !isValidDateKey(dobStr)) return '--';
+  const d = parseDateKey(dobStr);
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+}
