@@ -161,3 +161,21 @@ export function formatDobDisplay(dobStr?: string | null): string {
   const d = parseDateKey(dobStr);
   return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+/** BMI = weight(kg) / height(m)^2, rounded to 1 decimal place. */
+export function calculateBMI(weightKg?: number | null, heightCm?: number | null): number | null {
+  if (!weightKg || !heightCm) return null;
+  const heightM = heightCm / 100;
+  const bmi = weightKg / (heightM * heightM);
+  return Number.isFinite(bmi) ? Math.round(bmi * 10) / 10 : null;
+}
+
+export type BMITone = 'cyan' | 'success' | 'amber' | 'error';
+
+/** Standard WHO adult BMI bands, each mapped to a theme color tone. */
+export function getBMICategory(bmi: number): { label: string; tone: BMITone } {
+  if (bmi < 18.5) return { label: 'Underweight', tone: 'cyan' };
+  if (bmi < 25) return { label: 'Normal', tone: 'success' };
+  if (bmi < 30) return { label: 'Overweight', tone: 'amber' };
+  return { label: 'Obese', tone: 'error' };
+}

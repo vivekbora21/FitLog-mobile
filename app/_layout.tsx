@@ -1,6 +1,8 @@
 import React from 'react';
+import '../src/lib/alertPolyfill';
 import { StatusBar } from 'expo-status-bar';
-import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
+import { AppState } from 'react-native';
+import { QueryClient, QueryClientProvider, focusManager, onlineManager } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { addNetworkStateListener } from 'expo-network';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -23,6 +25,13 @@ const queryClient = new QueryClient({
 onlineManager.setEventListener((setOnline) => {
   const subscription = addNetworkStateListener((state) => setOnline(state.isConnected !== false));
   return () => subscription.remove();
+});
+
+// Refetch stale queries whenever the app returns to the foreground, so screens like the
+// Workouts tab and Workout Plan don't keep showing data cached from before a status
+// change made elsewhere in the app.
+AppState.addEventListener('change', (state) => {
+  focusManager.setFocused(state === 'active');
 });
 
 const modal = { presentation: 'modal', animation: 'slide_from_bottom' } as const;

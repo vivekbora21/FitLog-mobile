@@ -14,6 +14,8 @@ import {
   RotateCcw,
   ChevronRight,
   Flame,
+  Plus,
+  CalendarDays,
 } from 'lucide-react-native';
 import { api, extractErrorMessage, type CalendarDayInfo, type DayStatus } from '../../api/client';
 import { Badge } from './Badge';
@@ -311,12 +313,41 @@ export function DayActionModal({ visible, dateKey, dayInfo, onClose, onStatusUpd
                     </View>
                   </View>
                   <Button
-                    title={`Log workout for ${relativeLabel.toLowerCase() === 'today' || relativeLabel.toLowerCase() === 'yesterday' ? relativeLabel : formattedFullDate}`}
+                    title={programDay ? `Start scheduled routine (${programDay.label})` : `Log workout for ${relativeLabel.toLowerCase() === 'today' || relativeLabel.toLowerCase() === 'yesterday' ? relativeLabel : formattedFullDate}`}
                     icon={<Dumbbell size={18} color="#FFFFFF" />}
                     iconPosition="left"
                     onPress={handleStartWorkout}
                     style={styles.primaryLogBtn}
                   />
+                  {programDay && (
+                    <>
+                      <Button
+                        title="Log different / custom workout"
+                        variant="secondary"
+                        icon={<Plus size={16} color={colors.textPrimary} />}
+                        iconPosition="left"
+                        onPress={() => {
+                          onClose();
+                          router.push({
+                            pathname: '/workout/log',
+                            params: { date: dateKey },
+                          });
+                        }}
+                        style={{ marginTop: spacing.xs }}
+                      />
+                      <Button
+                        title="Change routine in Workout Plan"
+                        variant="ghost"
+                        icon={<CalendarDays size={16} color={colors.primaryLight} />}
+                        iconPosition="left"
+                        onPress={() => {
+                          onClose();
+                          router.push('/plan');
+                        }}
+                        style={{ marginTop: spacing.xs }}
+                      />
+                    </>
+                  )}
                 </Card>
               )}
             </View>

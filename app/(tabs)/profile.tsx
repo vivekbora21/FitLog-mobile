@@ -28,7 +28,7 @@ import { useAuth } from '../../src/providers/auth';
 import { Avatar, Badge, Button, PressableScale, ScreenHeader } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, type ThemePreference, makeStyles, useTheme } from '../../src/theme';
-import { humanize, calculateAge, formatDobDisplay } from '../../src/lib/format';
+import { humanize, calculateAge, formatDobDisplay, calculateBMI, getBMICategory } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
 
 const enter = (i: number) => FadeInDown.delay(60 + i * 70).duration(420);
@@ -72,6 +72,8 @@ export default function ProfileScreen() {
   const name = user?.full_name || user?.username || 'User';
   const age = calculateAge(profile?.date_of_birth);
   const dobFormatted = formatDobDisplay(profile?.date_of_birth);
+  const bmi = calculateBMI(profile?.weight_kg, profile?.height_cm);
+  const bmiCategory = bmi != null ? getBMICategory(bmi) : null;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -137,11 +139,21 @@ export default function ProfileScreen() {
               label="Sex"
               value={profile?.sex ? humanize(profile.sex) : '--'}
             />
-            <ProfileStat
-              icon={<Activity size={16} color={colors.amber} />}
-              label="Activity"
-              value={humanize(profile?.activity_level) || 'Moderate'}
-            />
+            {bmi != null && bmiCategory ? (
+              <ProfileStat
+                icon={<Activity size={16} color={colors[bmiCategory.tone]} />}
+                label={bmiCategory.label}
+                value={`${bmi}`}
+                valueColor={colors[bmiCategory.tone]}
+                labelColor={colors[bmiCategory.tone]}
+              />
+            ) : (
+              <ProfileStat
+                icon={<Activity size={16} color={colors.amber} />}
+                label="Activity"
+                value={humanize(profile?.activity_level) || 'Moderate'}
+              />
+            )}
             <ProfileStat
               icon={<CalendarDays size={16} color={colors.primaryLight} />}
               label="DOB"
@@ -289,15 +301,27 @@ export default function ProfileScreen() {
   );
 }
 
-function ProfileStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function ProfileStat({
+  icon,
+  label,
+  value,
+  valueColor,
+  labelColor,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  valueColor?: string;
+  labelColor?: string;
+}) {
   const styles = useStyles();
   return (
     <View style={styles.stat} accessible accessibilityLabel={`${label}: ${value}`}>
       {icon}
-      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>
+      <Text style={[styles.statValue, valueColor ? { color: valueColor } : null]} numberOfLines={1} adjustsFontSizeToFit>
         {value}
       </Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statLabel, labelColor ? { color: labelColor } : null]}>{label}</Text>
     </View>
   );
 }

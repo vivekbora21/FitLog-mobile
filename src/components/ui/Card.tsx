@@ -37,6 +37,7 @@ export function Card({
         scaleTo={0.98}
         accessibilityHint={accessibilityHint}
         style={cardStyle}
+        {...rest}
       >
         {children}
       </PressableScale>

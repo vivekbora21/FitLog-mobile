@@ -16,7 +16,11 @@ import {
   Copy,
   History,
   ChevronDown,
+  Flame,
+  Dumbbell,
+  ShieldCheck,
 } from 'lucide-react-native';
+import { useAuth } from '../../src/providers/auth';
 import { api, extractErrorMessage } from '../../src/api/client';
 import {
   Badge,
@@ -56,6 +60,7 @@ const enter = (i: number) => FadeInDown.delay(60 + i * 70).duration(420);
 export default function NutritionScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
+  const { user } = useAuth();
   const bottomClearance = useTabBarClearance();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -216,14 +221,81 @@ export default function NutritionScreen() {
       </SafeAreaView>
     );
   }
+  const plan = nutritionData?.plan;
+  const planMode = plan?.mode || (historyData?.program?.mode as any) || (user?.profile?.fitness_goal === 'FAT_LOSS' ? 'CUT' : (user?.profile?.fitness_goal === 'HYPERTROPHY' || user?.profile?.fitness_goal === 'STRENGTH') ? 'BULK' : 'CUT');
+  const targetType: 'MAX' | 'MIN' | 'TARGET' = plan?.target_type || (planMode === 'BULK' ? 'MIN' : planMode === 'CUT' ? 'MAX' : 'TARGET');
+  const isBulk = targetType === 'MIN' || planMode === 'BULK';
+  const isCut = targetType === 'MAX' || planMode === 'CUT';
 
   const caloriesConsumed = day?.total_calories || 0;
   const caloriesTarget = targets?.daily_calories || 2200;
   const calPct = calculateMacroPercentage(caloriesConsumed, caloriesTarget);
   const caloriesLeft = caloriesTarget - caloriesConsumed;
 
+  let ringPct = Math.min(100, Math.max(0, calPct));
+  let ringColor = colors.primaryLight;
+  let ringGradient = colors.cyan;
+  let ringValue = formatNumber(Math.abs(caloriesLeft));
+  let ringLabel = caloriesLeft >= 0 ? 'kcal remaining' : 'kcal over';
+  let ringValueColor: string | undefined = undefined;
+  let ringLabelColor: string | undefined = caloriesLeft < 0 ? colors.warning : undefined;
+  let statStatusValue = `${calPct}%`;
+  let statAccent = true;
+
+  if (isBulk) {
+    if (caloriesConsumed < caloriesTarget) {
+      const kcalNeeded = caloriesTarget - caloriesConsumed;
+      ringPct = Math.min(100, Math.max(0, calPct));
+      ringColor = colors.amber;
+      ringGradient = colors.primaryLight;
+      ringValue = formatNumber(kcalNeeded);
+      ringLabel = 'kcal needed (min)';
+      ringLabelColor = colors.amber;
+      statStatusValue = `${calPct}% of min`;
+      statAccent = false;
+    } else {
+      const surplus = caloriesConsumed - caloriesTarget;
+      ringPct = 100;
+      ringColor = colors.success;
+      ringGradient = colors.cyan;
+      ringValue = surplus > 0 ? `+${formatNumber(surplus)}` : 'Hit!';
+      ringValueColor = colors.success;
+      ringLabel = 'kcal surplus · Min met 🎉';
+      ringLabelColor = colors.success;
+      statStatusValue = 'Min Met';
+      statAccent = true;
+    }
+  } else if (isCut) {
+    if (caloriesConsumed <= caloriesTarget) {
+      ringPct = Math.min(100, Math.max(0, calPct));
+      ringColor = colors.primaryLight;
+      ringGradient = colors.cyan;
+      ringValue = formatNumber(caloriesLeft);
+      ringLabel = 'kcal left (max)';
+      statStatusValue = `${calPct}% (Under)`;
+      statAccent = true;
+    } else {
+      const over = caloriesConsumed - caloriesTarget;
+      ringPct = 100;
+      ringColor = colors.warning;
+      ringGradient = colors.rose;
+      ringValue = formatNumber(over);
+      ringValueColor = colors.warning;
+      ringLabel = 'kcal over deficit max';
+      ringLabelColor = colors.warning;
+      statStatusValue = 'Over Max';
+      statAccent = false;
+    }
+  }
+
   const macros = [
-    { label: 'Protein', consumed: day?.total_protein || 0, target: targets?.protein_g || 160, color: colors.cyan },
+    {
+      label: 'Protein',
+      sublabel: isCut ? 'Shield (2.1g/kg)' : isBulk ? 'Growth (1.8g/kg)' : undefined,
+      consumed: day?.total_protein || 0,
+      target: targets?.protein_g || 160,
+      color: colors.cyan,
+    },
     { label: 'Carbs', consumed: day?.total_carbs || 0, target: targets?.carbs_g || 240, color: colors.amber },
     { label: 'Fat', consumed: day?.total_fat || 0, target: targets?.fat_g || 65, color: colors.violet },
   ];
@@ -267,21 +339,63 @@ export default function NutritionScreen() {
 
         <DateNavigator date={date} onChange={setDate} />
 
-        {/* Calorie hero */}
+        {/* Plan Mode & Target Banner */}
         <Animated.View entering={enter(0)}>
+          <Card style={styles.planBannerCard}>
+            <View style={styles.planBannerRow}>
+              <View
+                style={[
+                  styles.planBannerIcon,
+                  { backgroundColor: isBulk ? `${colors.amber}20` : isCut ? `${colors.primaryLight}20` : `${colors.cyan}20` },
+                ]}
+              >
+                {isBulk ? (
+                  <Dumbbell size={18} color={colors.amber} />
+                ) : isCut ? (
+                  <Flame size={18} color={colors.primaryLight} />
+                ) : (
+                  <ShieldCheck size={18} color={colors.cyan} />
+                )}
+              </View>
+              <View style={styles.planBannerInfo}>
+                <View style={styles.planBannerTitleRow}>
+                  <Text style={styles.planBannerTitle}>
+                    {isBulk ? 'Bulk Plan · Surplus Floor' : isCut ? 'Cut Plan · Deficit Ceiling' : 'Maintenance Plan'}
+                  </Text>
+                  <Badge
+                    label={isBulk ? 'Min Target' : isCut ? 'Deficit Max' : 'Target'}
+                    tone={isBulk ? 'amber' : isCut ? 'cyan' : 'slate'}
+                  />
+                </View>
+                <Text style={styles.planBannerDesc}>
+                  {isBulk
+                    ? `Eat at least ${formatNumber(caloriesTarget)} kcal with ${targets?.protein_g || 160}g protein to maximize muscle growth.`
+                    : isCut
+                    ? `Stay under ${formatNumber(caloriesTarget)} kcal while hitting ${targets?.protein_g || 160}g protein to protect lean muscle.`
+                    : `Aim for ${formatNumber(caloriesTarget)} kcal and ${targets?.protein_g || 160}g protein daily.`}
+                </Text>
+              </View>
+            </View>
+          </Card>
+        </Animated.View>
+
+        {/* Calorie hero */}
+        <Animated.View entering={enter(1)}>
           <Card elevated style={styles.heroCard}>
             <View style={styles.heroTop}>
               <ProgressRing
-                percentage={calPct}
+                percentage={ringPct}
                 size={176}
                 strokeWidth={14}
-                color={colors.primaryLight}
-                gradientTo={colors.cyan}
+                color={ringColor}
+                gradientTo={ringGradient}
                 delay={200}
               >
-                <Text style={styles.heroValue}>{formatNumber(Math.abs(caloriesLeft))}</Text>
-                <Text style={[styles.heroLabel, caloriesLeft < 0 && { color: colors.warning }]}>
-                  {caloriesLeft >= 0 ? 'kcal remaining' : 'kcal over'}
+                <Text style={[styles.heroValue, ringValueColor ? { color: ringValueColor } : undefined]}>
+                  {ringValue}
+                </Text>
+                <Text style={[styles.heroLabel, ringLabelColor ? { color: ringLabelColor } : undefined]}>
+                  {ringLabel}
                 </Text>
               </ProgressRing>
             </View>
@@ -289,15 +403,22 @@ export default function NutritionScreen() {
             <View style={styles.heroStatsRow}>
               <HeroStat label="Eaten" value={formatNumber(caloriesConsumed)} />
               <View style={styles.heroDivider} />
-              <HeroStat label="Goal" value={formatNumber(caloriesTarget)} />
+              <HeroStat
+                label={isBulk ? 'Min Target' : isCut ? 'Max Deficit' : 'Goal'}
+                value={formatNumber(caloriesTarget)}
+              />
               <View style={styles.heroDivider} />
-              <HeroStat label="Progress" value={`${calPct}%`} accent />
+              <HeroStat
+                label={isBulk ? (caloriesConsumed >= caloriesTarget ? 'Surplus' : 'Progress') : isCut ? 'Deficit' : 'Progress'}
+                value={statStatusValue}
+                accent={statAccent}
+              />
             </View>
           </Card>
         </Animated.View>
 
         {/* Macro rings */}
-        <Animated.View entering={enter(1)} style={styles.macroRow}>
+        <Animated.View entering={enter(2)} style={styles.macroRow}>
           {macros.map((m, i) => {
             const pct = calculateMacroPercentage(m.consumed, m.target);
             return (
@@ -317,6 +438,9 @@ export default function NutritionScreen() {
                   <Text style={styles.macroPct}>{pct}%</Text>
                 </ProgressRing>
                 <Text style={styles.macroLabel}>{m.label}</Text>
+                {m.sublabel ? (
+                  <Text style={styles.macroSublabel}>{m.sublabel}</Text>
+                ) : null}
                 <Text style={styles.macroValue}>
                   {formatNumber(m.consumed)}
                   <Text style={styles.macroTarget}> / {formatNumber(m.target)}g</Text>
@@ -474,6 +598,8 @@ export default function NutritionScreen() {
             <NutritionHistoryCard
               item={item}
               isSelected={item.date === date}
+              activePlanMode={planMode}
+              activeTargetType={targetType}
               onSelect={() => {
                 haptics.selection();
                 setDate(item.date);
@@ -614,11 +740,15 @@ function MacroChip({ letter, value, color }: { letter: string; value: number; co
 function NutritionHistoryCard({
   item,
   isSelected,
+  activePlanMode,
+  activeTargetType,
   onSelect,
   onLogMeal,
 }: {
   item: NutritionHistoryDay;
   isSelected: boolean;
+  activePlanMode?: string;
+  activeTargetType?: 'MAX' | 'MIN' | 'TARGET';
   onSelect: () => void;
   onLogMeal: () => void;
 }) {
@@ -636,6 +766,73 @@ function NutritionHistoryCard({
   const calTarget = item.target_calories || 2200;
   const pct = Math.round((calConsumed / Math.max(1, calTarget)) * 100);
   const calDiff = calConsumed - calTarget;
+
+  const itemMode = item.mode || activePlanMode || 'CUT';
+  const itemTargetType = item.target_type || activeTargetType || (itemMode === 'BULK' ? 'MIN' : itemMode === 'CUT' ? 'MAX' : 'TARGET');
+  const isItemBulk = itemTargetType === 'MIN' || itemMode === 'BULK';
+  const isItemCut = itemTargetType === 'MAX' || itemMode === 'CUT';
+
+  const targetProtein = item.target_protein || 160;
+  const targetCarbs = item.target_carbs || 240;
+  const targetFat = item.target_fat || 65;
+  const targetWater = item.target_water || 2500;
+  const isProteinMet = item.total_protein >= targetProtein;
+  const proteinPct = Math.round((item.total_protein / Math.max(1, targetProtein)) * 100);
+
+  const renderBadge = () => {
+    if (isSelected) {
+      return <Badge label="Viewing" tone="cyan" />;
+    }
+    if (!item.has_logged) {
+      return <Badge label="Open Day" tone="slate" />;
+    }
+    if (isItemBulk) {
+      if (calConsumed >= calTarget) {
+        if (calDiff > 500) {
+          return <Badge label={`+${formatNumber(calDiff)} kcal (high surplus)`} tone="amber" />;
+        }
+        return <Badge label={calDiff === 0 ? 'Min Target Met' : `+${formatNumber(calDiff)} surplus met`} tone="emerald" />;
+      }
+      const needed = calTarget - calConsumed;
+      if (needed <= 150) {
+        return <Badge label={`${formatNumber(needed)} kcal to min`} tone="emerald" />;
+      }
+      return <Badge label={`${formatNumber(needed)} kcal needed (min)`} tone="amber" />;
+    }
+    if (isItemCut) {
+      if (calDiff > 0) {
+        return <Badge label={`${formatNumber(calDiff)} kcal over deficit`} tone="amber" />;
+      }
+      const under = Math.abs(calDiff);
+      if (under <= 100) {
+        return <Badge label="On Deficit Target" tone="emerald" />;
+      }
+      return <Badge label={`${formatNumber(under)} kcal under max`} tone="cyan" />;
+    }
+    // Balanced
+    if (calDiff >= -150 && calDiff <= 150) {
+      return <Badge label="On Target" tone="emerald" />;
+    }
+    if (calDiff > 150) {
+      return <Badge label={`${formatNumber(calDiff)} kcal over`} tone="amber" />;
+    }
+    return <Badge label={`${formatNumber(Math.abs(calDiff))} kcal left`} tone="cyan" />;
+  };
+
+  const getBarColor = () => {
+    if (pct === 0) return 'transparent';
+    if (isItemBulk) {
+      if (pct >= 100) return pct > 125 ? colors.amber : colors.success;
+      if (pct >= 80) return colors.primaryLight;
+      return colors.amber;
+    }
+    if (isItemCut) {
+      if (pct > 105) return colors.warning;
+      if (pct >= 85) return colors.primaryLight;
+      return colors.cyan;
+    }
+    return pct > 110 ? colors.warning : pct >= 85 ? colors.primaryLight : colors.cyan;
+  };
 
   return (
     <Card elevated style={[styles.historyCard, isSelected && styles.historyCardSelected]}>
@@ -670,26 +867,28 @@ function NutritionHistoryCard({
                   ? `Yesterday · ${weekday}, ${dayOfMonth} ${monthShort}`
                   : `${weekday}, ${dayOfMonth} ${monthShort}`}
               </Text>
-              {isSelected ? (
-                <Badge label="Viewing" tone="cyan" />
-              ) : !item.has_logged ? (
-                <Badge label="Open Day" tone="slate" />
-              ) : calDiff >= -150 && calDiff <= 150 ? (
-                <Badge label="On Target" tone="emerald" />
-              ) : calDiff > 150 ? (
-                <Badge label={`${formatNumber(calDiff)} kcal over`} tone="amber" />
-              ) : (
-                <Badge label={`${formatNumber(Math.abs(calDiff))} kcal left`} tone="cyan" />
-              )}
+              {renderBadge()}
             </View>
 
             {/* Calories Text and Target Bar */}
             <View style={styles.historyCalRow}>
               <Text style={styles.historyCalText}>
                 {formatNumber(calConsumed)}
-                <Text style={styles.historyCalTargetText}> / {formatNumber(calTarget)} kcal</Text>
+                <Text style={styles.historyCalTargetText}>
+                  {isItemBulk
+                    ? ` / min ${formatNumber(calTarget)} kcal`
+                    : isItemCut
+                    ? ` / max ${formatNumber(calTarget)} kcal`
+                    : ` / ${formatNumber(calTarget)} kcal`}
+                </Text>
               </Text>
-              <Text style={[styles.historyCalPct, pct > 110 && { color: colors.warning }]}>
+              <Text
+                style={[
+                  styles.historyCalPct,
+                  isItemBulk && pct >= 100 && { color: colors.success },
+                  isItemCut && pct > 105 && { color: colors.warning },
+                ]}
+              >
                 {pct}%
               </Text>
             </View>
@@ -699,14 +898,7 @@ function NutritionHistoryCard({
                   styles.historyProgressBarFill,
                   {
                     width: `${Math.min(100, Math.max(0, pct))}%`,
-                    backgroundColor:
-                      pct > 110
-                        ? colors.warning
-                        : pct >= 85
-                        ? colors.primaryLight
-                        : pct > 0
-                        ? colors.cyan
-                        : 'transparent',
+                    backgroundColor: getBarColor(),
                   },
                 ]}
               />
@@ -714,26 +906,48 @@ function NutritionHistoryCard({
           </View>
         </View>
 
-        {/* Content details: macros or empty prompt */}
+        {/* Content details: macros */}
         {item.has_logged ? (
           <View style={styles.historyBody}>
             <View style={styles.historyMacrosRow}>
-              <View style={styles.historyMacroPill}>
-                <View style={[styles.historyMacroDot, { backgroundColor: colors.cyan }]} />
-                <Text style={styles.historyMacroText}>P: {Math.round(item.total_protein)}g</Text>
+              <View
+                style={[
+                  styles.historyMacroPill,
+                  isProteinMet && styles.historyMacroPillSuccess,
+                ]}
+              >
+                <View style={[styles.historyMacroDot, { backgroundColor: isProteinMet ? colors.success : colors.cyan }]} />
+                <Text style={styles.historyMacroText}>
+                  P: {Math.round(item.total_protein)}
+                  <Text style={styles.historyMacroTargetText}>/{Math.round(targetProtein)}g</Text>
+                </Text>
+                {isProteinMet ? (
+                  <Text style={styles.historyMacroMetTag}>✓</Text>
+                ) : (
+                  <Text style={styles.historyMacroPctTag}>{proteinPct}%</Text>
+                )}
               </View>
               <View style={styles.historyMacroPill}>
                 <View style={[styles.historyMacroDot, { backgroundColor: colors.amber }]} />
-                <Text style={styles.historyMacroText}>C: {Math.round(item.total_carbs)}g</Text>
+                <Text style={styles.historyMacroText}>
+                  C: {Math.round(item.total_carbs)}
+                  <Text style={styles.historyMacroTargetText}>/{Math.round(targetCarbs)}g</Text>
+                </Text>
               </View>
               <View style={styles.historyMacroPill}>
                 <View style={[styles.historyMacroDot, { backgroundColor: colors.violet }]} />
-                <Text style={styles.historyMacroText}>F: {Math.round(item.total_fat)}g</Text>
+                <Text style={styles.historyMacroText}>
+                  F: {Math.round(item.total_fat)}
+                  <Text style={styles.historyMacroTargetText}>/{Math.round(targetFat)}g</Text>
+                </Text>
               </View>
               {item.water_consumed_ml > 0 && (
                 <View style={styles.historyMacroPill}>
                   <View style={[styles.historyMacroDot, { backgroundColor: colors.blue }]} />
-                  <Text style={styles.historyMacroText}>{(item.water_consumed_ml / 1000).toFixed(1)}L</Text>
+                  <Text style={styles.historyMacroText}>
+                    {(item.water_consumed_ml / 1000).toFixed(1)}
+                    <Text style={styles.historyMacroTargetText}>/{(targetWater / 1000).toFixed(1)}L</Text>
+                  </Text>
                 </View>
               )}
             </View>
@@ -744,26 +958,81 @@ function NutritionHistoryCard({
               </Text>
             )}
           </View>
-        ) : (
-          <View style={styles.historyEmptyRow}>
-            <Text style={styles.historyEmptyText}>No meals or water logged for this day</Text>
-            <PressableScale
-              haptic="selection"
-              onPress={onLogMeal}
-              style={styles.historyLogBtn}
-              accessibilityLabel={`Log food for ${item.date}`}
-            >
-              <Plus size={14} color="#FFFFFF" strokeWidth={2.5} />
-              <Text style={styles.historyLogBtnText}>Log food</Text>
-            </PressableScale>
-          </View>
-        )}
+        ) : null}
       </PressableScale>
+
+      {!item.has_logged ? (
+        <View style={styles.historyEmptyRow}>
+          <PressableScale
+            haptic="selection"
+            scaleTo={0.99}
+            onPress={onSelect}
+            style={styles.historyEmptyTextPressable}
+            accessibilityLabel={`View nutrition details for ${item.date}`}
+          >
+            <Text style={styles.historyEmptyText}>No meals or water logged for this day</Text>
+          </PressableScale>
+          <PressableScale
+            haptic="selection"
+            onPress={onLogMeal}
+            style={styles.historyLogBtn}
+            accessibilityLabel={`Log food for ${item.date}`}
+          >
+            <Plus size={14} color="#FFFFFF" strokeWidth={2.5} />
+            <Text style={styles.historyLogBtnText}>Log food</Text>
+          </PressableScale>
+        </View>
+      ) : null}
     </Card>
   );
 }
 
 const useStyles = makeStyles(({ colors }) => ({
+  planBannerCard: {
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceElevated,
+  },
+  planBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm + 2,
+  },
+  planBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planBannerInfo: {
+    flex: 1,
+  },
+  planBannerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  planBannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  planBannerDesc: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.textSecondary,
+    lineHeight: 15,
+  },
+  macroSublabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.primaryLight,
+    marginTop: 1,
+  },
   headerAddBtn: {
     width: 44,
     height: 44,
@@ -1215,9 +1484,15 @@ const useStyles = makeStyles(({ colors }) => ({
     alignItems: 'center',
     gap: 4,
     backgroundColor: colors.surfaceElevated,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  historyMacroPillSuccess: {
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
   },
   historyMacroDot: {
     width: 5,
@@ -1228,6 +1503,23 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 11,
     fontWeight: '700',
     color: colors.textSecondary,
+  },
+  historyMacroTargetText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  historyMacroMetTag: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.success,
+    marginLeft: 2,
+  },
+  historyMacroPctTag: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.textMuted,
+    marginLeft: 2,
   },
   historyMealsPreview: {
     fontSize: 11,
@@ -1244,11 +1536,13 @@ const useStyles = makeStyles(({ colors }) => ({
     borderTopWidth: 1,
     borderTopColor: colors.borderSubtle,
   },
+  historyEmptyTextPressable: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
   historyEmptyText: {
     fontSize: 12,
     color: colors.textMuted,
-    flex: 1,
-    marginRight: spacing.sm,
   },
   historyLogBtn: {
     flexDirection: 'row',

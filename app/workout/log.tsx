@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clock, Pencil, Plus, Sparkles } from 'lucide-react-native';
@@ -23,7 +23,9 @@ import {
   draftHasContent,
   exerciseFromRoutine,
   exercisesFromSession,
+  isCardioExercise,
   loadWorkoutDraft,
+  newCardioSet,
   newSet,
   nextKey,
   saveWorkoutDraft,
@@ -83,20 +85,22 @@ export default function LogWorkoutScreen() {
   const isLive = !editId && live && isToday;
 
   // 1. Offer to resume an unfinished workout before anything else.
+  const resumeDraft = (d: WorkoutDraft) => {
+    setPrefilled(true);
+    setDate(d.date);
+    setTitle(d.title);
+    setNotes(d.notes);
+    setDuration(d.duration);
+    setLive(d.live);
+    setStartedAt(d.startedAt);
+    setRoutineId(d.routineId);
+    setExercises(d.exercises);
+    setReady(true);
+  };
+
   useEffect(() => {
-    if (!savedDraft || !hasDraft || resumeNow) return;
-    const resume = (d: WorkoutDraft) => {
-      setPrefilled(true);
-      setDate(d.date);
-      setTitle(d.title);
-      setNotes(d.notes);
-      setDuration(d.duration);
-      setLive(d.live);
-      setStartedAt(d.startedAt);
-      setRoutineId(d.routineId);
-      setExercises(d.exercises);
-      setReady(true);
-    };
+    if (!savedDraft || !hasDraft || resumeNow || ready) return;
+    if (Platform.OS === 'web') return; // Web renders the in-screen prompt card directly
     Alert.alert(
       'Resume your workout?',
       `"${savedDraft.title || 'Workout'}" from ${formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn't finished yet.`,
@@ -109,21 +113,30 @@ export default function LogWorkoutScreen() {
             setReady(true);
           },
         },
-        { text: 'Resume', onPress: () => resume(savedDraft) },
+        { text: 'Resume', onPress: () => resumeDraft(savedDraft) },
       ],
       { cancelable: false }
     );
-  }, [savedDraft, hasDraft, resumeNow]);
+  }, [savedDraft, hasDraft, resumeNow, ready]);
 
   const planQuery = useQuery({
     queryKey: ['workoutPlan'],
     queryFn: () => api.getWorkoutPlan(),
   });
 
+  // Same query key/cache as the Workouts tab & dashboard — this is almost always a cache
+  // hit here. Used only to source the backend's drift-corrected program-day number for the
+  // "Day N" pills below, so this screen never disagrees with the Workouts tab's history.
+  const statsQuery = useQuery({
+    queryKey: ['dashboardStats'],
+    queryFn: () => api.getDashboardStats(),
+  });
+  const stats = statsQuery.data;
+
   const todayQuery = useQuery({
     queryKey: ['todaysWorkout'],
     queryFn: () => api.getTodaysWorkout(),
-    enabled: usePlan,
+    enabled: usePlan && !params.routineId,
   });
   const planDay = todayQuery.data?.today;
   const routine = planDay?.routine_details;
@@ -136,10 +149,18 @@ export default function LogWorkoutScreen() {
   });
   const session = sessionQuery.data;
 
+  const isWaitingData = editId
+    ? sessionQuery.isLoading
+    : params.routineId
+    ? planQuery.isLoading
+    : usePlan
+    ? todayQuery.isLoading
+    : false;
+
   // 2. One-time prefill from plan, routineId param, or from the session being edited
-  if (!prefilled && ready) {
-    if (params.routineId && planQuery.data?.days) {
-      const matchDay = planQuery.data.days.find(
+  if (!prefilled && ready && !isWaitingData) {
+    if (params.routineId) {
+      const matchDay = planQuery.data?.days?.find(
         (d) => d.routine === params.routineId || d.routine_details?.id === params.routineId
       );
       if (matchDay?.routine_details) {
@@ -147,6 +168,13 @@ export default function LogWorkoutScreen() {
         setTitle(matchDay.routine_details.name || matchDay.label || 'Workout');
         setExercises((matchDay.routine_details.exercises ?? []).map(exerciseFromRoutine));
         setRoutineId(matchDay.routine_details.id);
+      } else if (routine && (routine.id === params.routineId || planDay?.routine === params.routineId)) {
+        setPrefilled(true);
+        setTitle(routine.name || planDay?.label || 'Workout');
+        setExercises((routine.exercises ?? []).map(exerciseFromRoutine));
+        setRoutineId(routine.id);
+      } else {
+        setPrefilled(true);
       }
     } else if (usePlan && routine) {
       setPrefilled(true);
@@ -220,7 +248,12 @@ export default function LogWorkoutScreen() {
   // Links routine so program advances regardless of whether logged today or backdated.
   const linkRoutine = !editId ? routineId : null;
 
-  const loggedSets = exercises.flatMap((ex) => ex.sets.filter((s) => loggedReps(s.reps)));
+  const loggedSets = exercises.flatMap((ex) => {
+    const isCardio = ex.isCardio || isCardioExercise(ex.name, ex.muscle);
+    return isCardio
+      ? ex.sets.filter((s) => (parseNumberInput(s.durationMinutes || '') ?? 0) > 0 || s.done)
+      : ex.sets.filter((s) => loggedReps(s.reps));
+  });
   const volume = exercises.reduce(
     (sum, ex) =>
       sum +
@@ -261,21 +294,34 @@ export default function LogWorkoutScreen() {
       duration_seconds: seconds,
       notes: notes.trim(),
       exercises: exercises
-        .map((ex, i) => ({
-          exercise: ex.exerciseId,
-          order: i + 1,
-          rest_seconds: ex.restSeconds,
-          notes: '',
-          sets: ex.sets
-            .filter((s) => loggedReps(s.reps))
-            .map((s, si) => ({
+        .map((ex, i) => {
+          const isCardio = ex.isCardio || isCardioExercise(ex.name, ex.muscle);
+          const activeSets = isCardio
+            ? ex.sets.filter((s) => (parseNumberInput(s.durationMinutes || '') ?? 0) > 0 || s.done)
+            : ex.sets.filter((s) => loggedReps(s.reps));
+
+          return {
+            exercise: ex.exerciseId,
+            order: i + 1,
+            rest_seconds: ex.restSeconds,
+            notes: ex.notes || '',
+            sets: activeSets.map((s, si) => ({
               set_number: si + 1,
               set_type: s.type,
               weight_kg: parseNumberInput(s.weight) ?? 0,
               reps: Math.round(parseNumberInput(s.reps) ?? 0),
+              duration_seconds: s.durationMinutes ? Math.round((parseNumberInput(s.durationMinutes || '') ?? 0) * 60) : null,
+              distance_km: parseNumberInput(s.distanceKm || '') ?? null,
+              incline_percent: parseNumberInput(s.incline || '') ?? null,
+              speed_kmh: parseNumberInput(s.speedKmh || '') ?? null,
+              resistance_level: s.resistance ? Math.round(parseNumberInput(s.resistance || '') ?? 0) : null,
+              calories: s.calories ? Math.round(parseNumberInput(s.calories || '') ?? 0) : null,
+              heart_rate: s.heartRate ? Math.round(parseNumberInput(s.heartRate || '') ?? 0) : null,
+              intensity: s.intensity || (isCardio ? 'Zone 2' : ''),
               completed: s.done,
             })),
-        }))
+          };
+        })
         .filter((ex) => ex.sets.length > 0),
     };
   };
@@ -344,9 +390,44 @@ export default function LogWorkoutScreen() {
   };
 
   const screenTitle = editId ? 'Edit workout' : 'Workout';
-  const waiting = (usePlan && todayQuery.isLoading) || (!!editId && sessionQuery.isLoading) || !ready;
 
-  if (waiting) {
+  // If there's an unfinished draft, show the prompt directly in-screen so it never hangs
+  // waiting for platform alert callbacks that might not fire on web.
+  if (!ready && hasDraft && savedDraft) {
+    return (
+      <SheetScreen title={screenTitle} onClose={() => router.back()}>
+        <Card style={styles.resumeCard}>
+          <View style={styles.resumeIconWrap}>
+            <Sparkles size={24} color={colors.primaryLight} />
+          </View>
+          <Text style={styles.resumeTitle}>Resume unfinished workout?</Text>
+          <Text style={styles.resumeSubtitle}>
+            "{savedDraft.title || 'Workout'}" from {formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn't finished yet.
+          </Text>
+          <View style={styles.resumeBtnCol}>
+            <Button
+              title="Resume workout"
+              size="lg"
+              onPress={() => resumeDraft(savedDraft)}
+              style={styles.resumeActionBtn}
+            />
+            <Button
+              title={params.routineId ? 'Start planned workout' : 'Start fresh'}
+              variant="secondary"
+              size="lg"
+              onPress={() => {
+                clearWorkoutDraft();
+                setReady(true);
+              }}
+              style={styles.resumeActionBtn}
+            />
+          </View>
+        </Card>
+      </SheetScreen>
+    );
+  }
+
+  if (isWaitingData) {
     return (
       <SheetScreen title={screenTitle} onClose={() => router.back()}>
         <ActivityIndicator color={colors.primaryLight} />
@@ -427,11 +508,11 @@ export default function LogWorkoutScreen() {
           const isSelected = date === item.key;
           const dObj = parseDateKey(item.key);
           const dateStr = dObj.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
-          const pillProgDay = getDateProgramDayNumber(
-            program?.start_date,
-            item.key,
-            program?.duration_days
-          );
+          // Backend's drift-corrected day number first; the naive calendar-offset guess
+          // only covers dates outside the dashboard-stats window (see format.ts).
+          const pillProgDay =
+            stats?.calendar_days?.[item.key]?.program_day?.day_number ??
+            getDateProgramDayNumber(program?.start_date, item.key, program?.duration_days);
           return (
             <PressableScale
               key={item.key}
@@ -460,11 +541,9 @@ export default function LogWorkoutScreen() {
           <Clock size={14} color={colors.amber} />
           <Text style={styles.pastDateBannerText}>
             Logging past workout: {(() => {
-              const progDayNum = getDateProgramDayNumber(
-                program?.start_date,
-                date,
-                program?.duration_days
-              );
+              const progDayNum =
+                stats?.calendar_days?.[date]?.program_day?.day_number ??
+                getDateProgramDayNumber(program?.start_date, date, program?.duration_days);
               const dObj = parseDateKey(date);
               const formattedDate = dObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
               return `${progDayNum ? `Day ${progDayNum} · ` : ''}${formatRelativeDay(dObj.toISOString())} (${formattedDate})`;
@@ -571,10 +650,20 @@ export default function LogWorkoutScreen() {
         onClose={() => setPickerOpen(false)}
         onPick={(e) => {
           setPickerOpen(false);
-          // Time-based exercises (treadmill, cycling, etc.) have no reps/weight to log —
-          // they're logged as a cardio session instead of added as a set-tracking row.
-          if (e.muscleSlug === 'cardio') {
-            setCardioExercise(e.name);
+          const isCardio = e.muscleSlug === 'cardio' || isCardioExercise(e.name, e.muscle);
+          if (isCardio) {
+            setExercises((list) => [
+              ...list,
+              {
+                key: nextKey(),
+                exerciseId: e.id,
+                name: e.name,
+                muscle: e.muscle,
+                restSeconds: 0,
+                isCardio: true,
+                sets: [newCardioSet('20', e.name.toLowerCase().includes('incline') ? '10' : '0', '4.8', 'Zone 2')],
+              },
+            ]);
             return;
           }
           setExercises((list) => [
@@ -762,5 +851,42 @@ const useStyles = makeStyles(({ colors }) => ({
     flexDirection: 'row',
     gap: spacing.sm,
     marginBottom: spacing.md,
+  },
+  resumeCard: {
+    padding: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.xl,
+    backgroundColor: colors.surface,
+  },
+  resumeIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.full,
+    backgroundColor: colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  resumeTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  resumeSubtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: spacing.sm,
+  },
+  resumeBtnCol: {
+    width: '100%',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  resumeActionBtn: {
+    width: '100%',
   },
 }));

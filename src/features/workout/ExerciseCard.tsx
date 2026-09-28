@@ -5,8 +5,9 @@ import { PressableScale } from '../../components/ui';
 import type { LastPerformance } from '../../api/client';
 import { makeStyles, radius, spacing, useTheme, type Palette } from '../../theme';
 import { formatRelativeDay } from '../../lib/format';
-import { newSet, type DraftExercise, type DraftSet, type SetType } from './draft';
+import { isCardioExercise, newSet, type DraftExercise, type DraftSet, type SetType } from './draft';
 import { formatClock } from './RestTimer';
+import { CardioExerciseCard } from './CardioExerciseCard';
 
 const SET_TYPE_ORDER: SetType[] = ['NORMAL', 'WARMUP', 'DROP', 'FAILURE'];
 const SET_TYPE_META: Record<SetType, { short: string; label: string; color: keyof Palette }> = {
@@ -32,6 +33,22 @@ interface Props {
 export function ExerciseCard({ exercise: ex, index, count, last, onChange, onRemove, onMove, onSetCompleted }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+
+  // If this is a cardio movement (treadmill, bike, rowing, incline walk, etc.), render the specialized cardio card
+  if (ex.isCardio || isCardioExercise(ex.name, ex.muscle)) {
+    return (
+      <CardioExerciseCard
+        exercise={ex}
+        index={index}
+        count={count}
+        last={last}
+        onChange={onChange}
+        onRemove={onRemove}
+        onMove={onMove}
+        onSetCompleted={onSetCompleted}
+      />
+    );
+  }
 
   const updateSet = (key: string, patch: Partial<DraftSet>) =>
     onChange((e) => ({ ...e, sets: e.sets.map((s) => (s.key === key ? { ...s, ...patch } : s)) }));

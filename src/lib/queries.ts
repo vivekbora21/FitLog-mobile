@@ -17,6 +17,7 @@ export function invalidateTrackingData(queryClient: QueryClient) {
       'personalRecords',
       'recentExercises',
       'lastPerformance',
+      'cardioEntries',
     ].map((key) =>
       queryClient.invalidateQueries({ queryKey: [key] })
     )

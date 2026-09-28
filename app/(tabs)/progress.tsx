@@ -32,6 +32,8 @@ import {
   Search,
   Calendar,
   X,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../../src/api/client';
 import {
@@ -61,6 +63,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Scale }[] = [
 const MUSCLE_FILTERS = ['All', 'Chest', 'Back', 'Legs', 'Shoulders', 'Arms'];
 
 const enter = (i: number) => FadeInDown.delay(50 + i * 50).duration(400);
+const HISTORY_PAGE_SIZE = 5;
 
 export default function ProgressScreen() {
   const { colors } = useTheme();
@@ -252,10 +255,13 @@ export default function ProgressScreen() {
     dashboardStats?.journey_pacing?.target_weight ||
     null;
 
-  const weightDelta =
-    currentWeight && startWeight && chronologicalWeights.length > 1
-      ? Math.round((currentWeight - startWeight) * 10) / 10
-      : null;
+  const weightDelta = useMemo(() => {
+    if (currentWeight == null || startWeight == null || chronologicalWeights.length <= 1) {
+      return null;
+    }
+    const diff = currentWeight - startWeight;
+    return Number(diff.toFixed(2));
+  }, [currentWeight, startWeight, chronologicalWeights.length]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -277,19 +283,19 @@ export default function ProgressScreen() {
           title="Progress"
           right={
             <PressableScale
-              haptic="selection"
-              onPress={() => {
-                if (activeTab === 'MEASUREMENTS') {
-                  setIsLoggingMeasurement((v) => !v);
-                } else {
-                  setIsLoggingWeight((v) => !v);
-                }
-              }}
-              style={styles.headerAddBtn}
-              accessibilityLabel={activeTab === 'MEASUREMENTS' ? 'Log measurement' : 'Log weight'}
-            >
-              <Plus size={20} color="#FFFFFF" strokeWidth={2.4} />
-            </PressableScale>
+                haptic="selection"
+                onPress={() => {
+                  if (activeTab === 'MEASUREMENTS') {
+                    setIsLoggingMeasurement((v) => !v);
+                  } else {
+                    setIsLoggingWeight((v) => !v);
+                  }
+                }}
+                style={styles.headerAddBtn}
+                accessibilityLabel={activeTab === 'MEASUREMENTS' ? 'Log measurement' : 'Log weight'}
+              >
+                <Plus size={20} color="#FFFFFF" strokeWidth={2.4} />
+              </PressableScale>
           }
         />
 
@@ -433,41 +439,80 @@ function WeightSection({
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const visibleWeights = showAllHistory
+    ? recentWeights
+    : recentWeights.slice(0, HISTORY_PAGE_SIZE);
   return (
     <View style={styles.sectionWrap}>
       {/* KPI Cards Row */}
       <Animated.View entering={enter(0)} style={styles.kpiRow}>
         <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>Current</Text>
-          <Text style={styles.kpiValue}>
+          <Text
+            style={styles.kpiLabel}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.8}
+          >
+            Current
+          </Text>
+          <Text
+            style={styles.kpiValue}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.75}
+          >
             {currentWeight != null ? `${currentWeight}` : '--'}
             <Text style={styles.kpiUnit}> kg</Text>
           </Text>
         </View>
 
         <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>Start</Text>
-          <Text style={styles.kpiValue}>
+          <Text
+            style={styles.kpiLabel}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.8}
+          >
+            Start
+          </Text>
+          <Text
+            style={styles.kpiValue}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.75}
+          >
             {startWeight != null ? `${startWeight}` : '--'}
             <Text style={styles.kpiUnit}> kg</Text>
           </Text>
         </View>
 
         <View style={styles.kpiCard}>
-          <Text style={styles.kpiLabel}>Net Change</Text>
+          <Text
+            style={styles.kpiLabel}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.8}
+          >
+            Net Change
+          </Text>
           <View style={styles.deltaValueRow}>
             {weightDelta != null && weightDelta !== 0 ? (
               weightDelta > 0 ? (
-                <TrendingUp size={14} color={colors.amber} />
+                <TrendingUp size={12} color={colors.amber} strokeWidth={2.4} />
               ) : (
-                <TrendingDown size={14} color={colors.primaryLight} />
+                <TrendingDown size={12} color={colors.primaryLight} strokeWidth={2.4} />
               )
             ) : (
-              <Minus size={14} color={colors.textMuted} />
+              <Minus size={12} color={colors.textMuted} strokeWidth={2.4} />
             )}
             <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
               style={[
                 styles.kpiValue,
+                styles.deltaText,
                 weightDelta != null && weightDelta < 0 && styles.textSuccess,
                 weightDelta != null && weightDelta > 0 && styles.textWarning,
               ]}
@@ -482,8 +527,20 @@ function WeightSection({
 
         {targetWeight != null && (
           <View style={styles.kpiCard}>
-            <Text style={styles.kpiLabel}>Goal Target</Text>
-            <Text style={[styles.kpiValue, styles.textTarget]}>
+            <Text
+              style={styles.kpiLabel}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+            >
+              Target
+            </Text>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+              style={[styles.kpiValue, styles.textTarget]}
+            >
               {targetWeight}
               <Text style={styles.kpiUnit}> kg</Text>
             </Text>
@@ -597,10 +654,11 @@ function WeightSection({
           />
         ) : (
           <View style={styles.historyList}>
-            {recentWeights.map((w, idx) => {
+            {visibleWeights.map((w) => {
+              const idx = recentWeights.indexOf(w);
               const prev = recentWeights[idx + 1];
               const diff =
-                prev != null ? Math.round((w.weight_kg - prev.weight_kg) * 10) / 10 : null;
+                prev != null ? Number((w.weight_kg - prev.weight_kg).toFixed(2)) : null;
 
               return (
                 <View key={w.id} style={styles.historyItem}>
@@ -642,6 +700,24 @@ function WeightSection({
               );
             })}
           </View>
+        )}
+
+        {recentWeights.length > HISTORY_PAGE_SIZE && (
+          <PressableScale
+            haptic="selection"
+            onPress={() => setShowAllHistory((v) => !v)}
+            style={styles.showMoreBtn}
+            accessibilityLabel={showAllHistory ? 'Show fewer weigh-ins' : 'Show all weigh-ins'}
+          >
+            <Text style={styles.showMoreText}>
+              {showAllHistory ? 'Show less' : `Show all ${recentWeights.length} weigh-ins`}
+            </Text>
+            {showAllHistory ? (
+              <ChevronUp size={16} color={colors.primaryLight} />
+            ) : (
+              <ChevronDown size={16} color={colors.primaryLight} />
+            )}
+          </PressableScale>
         )}
       </Animated.View>
     </View>
@@ -844,6 +920,8 @@ function PrsSection({
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const [showAllPrs, setShowAllPrs] = useState(false);
+  const visiblePrs = showAllPrs ? prs : prs.slice(0, HISTORY_PAGE_SIZE);
   return (
     <View style={styles.sectionWrap}>
       {/* Search and Filters */}
@@ -910,7 +988,7 @@ function PrsSection({
           />
         ) : (
           <View style={styles.prList}>
-            {prs.map((pr) => (
+            {visiblePrs.map((pr) => (
               <Card key={pr.id} elevated style={styles.prItemCard}>
                 <View style={styles.prHeader}>
                   <View style={styles.prIconBox}>
@@ -957,6 +1035,24 @@ function PrsSection({
               </Card>
             ))}
           </View>
+        )}
+
+        {prs.length > HISTORY_PAGE_SIZE && (
+          <PressableScale
+            haptic="selection"
+            onPress={() => setShowAllPrs((v) => !v)}
+            style={styles.showMoreBtn}
+            accessibilityLabel={showAllPrs ? 'Show fewer records' : 'Show all records'}
+          >
+            <Text style={styles.showMoreText}>
+              {showAllPrs ? 'Show less' : `Show all ${prs.length} records`}
+            </Text>
+            {showAllPrs ? (
+              <ChevronUp size={16} color={colors.primaryLight} />
+            ) : (
+              <ChevronDown size={16} color={colors.primaryLight} />
+            )}
+          </PressableScale>
         )}
       </Animated.View>
     </View>
@@ -1014,6 +1110,10 @@ function MeasurementsSection({
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const [showAllLogs, setShowAllLogs] = useState(false);
+  const visibleMeasurements = showAllLogs
+    ? measurements
+    : measurements.slice(0, HISTORY_PAGE_SIZE);
   // Sort oldest to newest for delta calculations
   const chrono = useMemo(() => {
     return [...measurements].sort(
@@ -1163,7 +1263,7 @@ function MeasurementsSection({
           />
         ) : (
           <View style={styles.mLogList}>
-            {measurements.map((entry) => (
+            {visibleMeasurements.map((entry) => (
               <Card key={entry.id} elevated style={styles.mLogCard}>
                 <View style={styles.mLogHeader}>
                   <View style={styles.historyDateBox}>
@@ -1218,6 +1318,24 @@ function MeasurementsSection({
               </Card>
             ))}
           </View>
+        )}
+
+        {measurements.length > HISTORY_PAGE_SIZE && (
+          <PressableScale
+            haptic="selection"
+            onPress={() => setShowAllLogs((v) => !v)}
+            style={styles.showMoreBtn}
+            accessibilityLabel={showAllLogs ? 'Show fewer entries' : 'Show all entries'}
+          >
+            <Text style={styles.showMoreText}>
+              {showAllLogs ? 'Show less' : `Show all ${measurements.length} entries`}
+            </Text>
+            {showAllLogs ? (
+              <ChevronUp size={16} color={colors.primaryLight} />
+            ) : (
+              <ChevronDown size={16} color={colors.primaryLight} />
+            )}
+          </PressableScale>
         )}
       </Animated.View>
     </View>
@@ -1314,7 +1432,7 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
   },
   kpiRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: 6,
   },
   kpiCard: {
     flex: 1,
@@ -1322,31 +1440,41 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: 4,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 64,
   },
   kpiLabel: {
     fontSize: 10,
     fontWeight: '700',
     color: colors.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
     marginBottom: 4,
+    textAlign: 'center',
   },
   kpiValue: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '800',
     color: colors.textPrimary,
+    textAlign: 'center',
   },
   kpiUnit: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
     color: colors.textMuted,
   },
   deltaValueRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    justifyContent: 'center',
+    gap: 2,
+    maxWidth: '100%',
+  },
+  deltaText: {
+    flexShrink: 1,
   },
   textSuccess: {
     color: colors.primaryLight,
@@ -1462,6 +1590,18 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
   },
   historyList: {
     gap: spacing.xs,
+  },
+  showMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: spacing.sm,
+  },
+  showMoreText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primaryLight,
   },
   historyItem: {
     flexDirection: 'row',

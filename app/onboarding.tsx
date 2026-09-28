@@ -20,7 +20,7 @@ import { api, extractErrorMessage } from '../src/api/client';
 import { Badge, Button, ChipGroup, Input, PressableScale, ProgressBar, SheetScreen } from '../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../src/theme';
 import type { JourneyMode, UserProfile } from '../src/types';
-import { parseNumberInput, toDateKey } from '../src/lib/format';
+import { calculateAge, formatDobDisplay, isValidDateKey, parseNumberInput, toDateKey } from '../src/lib/format';
 import { useAuth } from '../src/providers/auth';
 import { invalidateTrackingData } from '../src/lib/queries';
 import { haptics } from '../src/lib/haptics';
@@ -130,21 +130,7 @@ const WORKOUT_OPTIONS = [2, 3, 4, 5, 6].map((n) => ({ value: n, label: `${n}×` 
 
 const round1 = (n: number) => Number(n.toFixed(1));
 
-function ageFromDob(dob?: string | null): string {
-  if (!dob) return '';
-  const birth = new Date(dob);
-  const now = new Date();
-  let age = now.getFullYear() - birth.getFullYear();
-  if (now < new Date(now.getFullYear(), birth.getMonth(), birth.getDate())) age -= 1;
-  return age > 0 ? String(age) : '';
-}
 
-function dobFromAge(age: number, existing?: string | null): string {
-  if (existing && ageFromDob(existing) === String(age)) return existing;
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - age);
-  return toDateKey(d);
-}
 
 export default function OnboardingScreen() {
   const { colors } = useTheme();
@@ -160,7 +146,7 @@ export default function OnboardingScreen() {
   const [firstName, setFirstName] = useState(user?.first_name ?? '');
   const [lastName, setLastName] = useState(user?.last_name ?? '');
   const [sex, setSex] = useState<Sex | null>(profile?.sex as Sex || null);
-  const [age, setAge] = useState(ageFromDob(profile?.date_of_birth));
+  const [dob, setDob] = useState(profile?.date_of_birth ?? '');
   const [height, setHeight] = useState(profile?.height_cm != null ? String(profile.height_cm) : '');
   const [weight, setWeight] = useState(profile?.weight_kg != null ? String(profile.weight_kg) : '');
 
@@ -174,7 +160,8 @@ export default function OnboardingScreen() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const ageVal = parseNumberInput(age);
+  const cleanDob = dob.trim();
+  const dobAge = calculateAge(cleanDob);
   const heightVal = parseNumberInput(height);
   const weightVal = parseNumberInput(weight);
 
@@ -189,7 +176,15 @@ export default function OnboardingScreen() {
   const validateStep0 = () => {
     const next: Record<string, string> = {};
     if (!sex) next.sex = 'Please select biological sex';
-    if (ageVal == null || ageVal < 13 || ageVal > 100) next.age = 'Age must be 13–100';
+    if (!cleanDob) {
+      next.dob = 'Date of birth is required';
+    } else if (!isValidDateKey(cleanDob) || dobAge == null) {
+      next.dob = 'Please enter date as YYYY-MM-DD (e.g. 1998-05-15)';
+    } else if (dobAge < 13) {
+      next.dob = 'Must be at least 13 years old';
+    } else if (dobAge > 100) {
+      next.dob = 'Age must be 100 or younger';
+    }
     if (heightVal == null || heightVal < 100 || heightVal > 250) next.height = '100–250 cm';
     if (weightVal == null || weightVal < 30 || weightVal > 300) next.weight = '30–300 kg';
     setErrors(next);
@@ -212,7 +207,7 @@ export default function OnboardingScreen() {
         last_name: lastName.trim() || undefined,
         profile: {
           sex: sex!,
-          date_of_birth: dobFromAge(Math.round(ageVal!), profile?.date_of_birth),
+          date_of_birth: cleanDob,
           height_cm: heightVal,
           weight_kg: weightVal,
           activity_level: activity,
@@ -409,12 +404,19 @@ export default function OnboardingScreen() {
           {errors.sex ? <Text style={styles.error}>{errors.sex}</Text> : null}
 
           <Input
-            label="Age"
-            keyboardType="number-pad"
-            value={age}
-            onChangeText={setAge}
-            error={errors.age}
-            placeholder="e.g. 26"
+            label="Date of birth (YYYY-MM-DD)"
+            placeholder="e.g. 1998-05-15"
+            value={dob}
+            onChangeText={setDob}
+            error={errors.dob}
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxLength={10}
+            hint={
+              cleanDob && isValidDateKey(cleanDob) && dobAge != null
+                ? `${dobAge} years old · Born ${formatDobDisplay(cleanDob)}`
+                : 'Used to calculate metabolic rate (BMR) & daily calorie targets'
+            }
           />
 
           <View style={styles.row}>

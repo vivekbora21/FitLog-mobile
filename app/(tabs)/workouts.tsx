@@ -19,6 +19,9 @@ import {
   Trophy,
   FastForward,
   RotateCcw,
+  Repeat,
+  SkipForward,
+  SlidersHorizontal,
 } from 'lucide-react-native';
 import { api, extractErrorMessage, type CalendarDayInfo } from '../../src/api/client';
 import {
@@ -36,6 +39,8 @@ import {
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import type { WorkoutSession } from '../../src/types';
+import { ExercisePicker } from '../../src/features/workout/ExercisePicker';
+import { CardioSection } from '../../src/features/workout/CardioSection';
 import {
   formatDuration,
   formatRelativeDay,
@@ -120,10 +125,29 @@ export default function WorkoutsScreen() {
       queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
       queryClient.invalidateQueries({ queryKey: ['workoutSessions'] });
       queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
+      queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
     },
     onError: (err) => {
       haptics.error();
       Alert.alert("Couldn't update status", extractErrorMessage(err));
+    },
+  });
+
+  // Swapping today's recommended exercise for a different one (per program day, not the
+  // shared routine template). Shared with plan.tsx's rendering of the same `swap` field.
+  const [swapTarget, setSwapTarget] = useState<{ dayNumber: number; routineExerciseId: string } | null>(null);
+  const swapMutation = useMutation({
+    mutationFn: (payload: { day_number: number; routine_exercise_id: string; exercise_id: string }) =>
+      api.swapExercise(payload),
+    onSuccess: () => {
+      haptics.success();
+      queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
+      queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
+      setSwapTarget(null);
+    },
+    onError: (err) => {
+      haptics.error();
+      Alert.alert("Couldn't swap exercise", extractErrorMessage(err));
     },
   });
 
@@ -144,8 +168,14 @@ export default function WorkoutsScreen() {
   }, [programStartDate, currentProgramDay]);
 
   const selectedDateProgramDay = useMemo(() => {
-    return getDateProgramDayNumber(programStartDate, selectedDate, programDurationDays);
-  }, [programStartDate, selectedDate, programDurationDays]);
+    // Prefer the backend's drift-corrected day number (anchored to actual completion
+    // dates); only fall back to the naive calendar-offset guess when the date falls
+    // outside the stats window and calendar_days has nothing for it.
+    return (
+      selectedDayInfo?.program_day?.day_number ??
+      getDateProgramDayNumber(programStartDate, selectedDate, programDurationDays)
+    );
+  }, [selectedDayInfo, programStartDate, selectedDate, programDurationDays]);
 
   const historyDailyLogs = useMemo(() => {
     const list = [];
@@ -160,7 +190,9 @@ export default function WorkoutsScreen() {
         (s) => s.started_at && toDateKey(new Date(s.started_at)) === k
       );
       const dayInfo = stats?.calendar_days?.[k];
-      const programDayNum = getDateProgramDayNumber(programStartDate, k, programDurationDays);
+      // Same backend-first, naive-fallback rule as selectedDateProgramDay above.
+      const programDayNum =
+        dayInfo?.program_day?.day_number ?? getDateProgramDayNumber(programStartDate, k, programDurationDays);
 
       list.push({
         dateKey: k,
@@ -332,6 +364,15 @@ export default function WorkoutsScreen() {
           <Animated.View entering={enter(1)}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitleInline}>Today&apos;s session</Text>
+              <PressableScale
+                haptic="selection"
+                onPress={() => setActiveDayModal(todayKey)}
+                style={styles.dayOptionsBtn}
+                accessibilityLabel="Manage today's schedule and status"
+              >
+                <SlidersHorizontal size={13} color={colors.primaryLight} />
+                <Text style={styles.dayOptionsBtnText}>Day options</Text>
+              </PressableScale>
             </View>
             <Card elevated highlighted={!isDone && exercises.length > 0} style={styles.todayCard}>
               <View style={styles.todayHeader}>
@@ -363,29 +404,66 @@ export default function WorkoutsScreen() {
 
               {exercises.length > 0 ? (
                 <Animated.View layout={LinearTransition.duration(250)} style={styles.exerciseList}>
-                  {visibleExercises.map((ex, index) => (
-                    <Animated.View
-                      key={ex.id || index}
-                      entering={FadeInDown.duration(250)}
-                      style={styles.exerciseItem}
-                    >
-                      <View style={[styles.exerciseIndexBadge, isDone && styles.exerciseIndexDone]}>
-                        {isDone ? (
-                          <Check size={12} color={colors.primaryLight} strokeWidth={3} />
-                        ) : (
-                          <Text style={styles.exerciseIndexText}>{index + 1}</Text>
+                  {visibleExercises.map((ex, index) => {
+                    const displayName = ex.swap?.exercise_name || ex.exercise_name;
+                    const isSwapped = !!ex.swap;
+                    return (
+                      <Animated.View
+                        key={ex.id || index}
+                        entering={FadeInDown.duration(250)}
+                        style={styles.exerciseItem}
+                      >
+                        <View style={[styles.exerciseIndexBadge, isDone && styles.exerciseIndexDone]}>
+                          {isDone ? (
+                            <Check size={12} color={colors.primaryLight} strokeWidth={3} />
+                          ) : (
+                            <Text style={styles.exerciseIndexText}>{index + 1}</Text>
+                          )}
+                        </View>
+                        <View style={styles.exerciseNameCol}>
+                          <Text style={styles.exerciseNameText} numberOfLines={1}>
+                            {displayName}
+                          </Text>
+                          {isSwapped && <Text style={styles.swappedTag}>Swapped</Text>}
+                        </View>
+                        <View style={styles.setsPill}>
+                          <Text style={styles.setsPillText}>
+                            {ex.target_sets} × {ex.target_reps}
+                          </Text>
+                        </View>
+                        {!isDone && today?.day_number != null && (
+                          <View style={styles.exerciseActionsInline}>
+                            <PressableScale
+                              haptic="selection"
+                              onPress={() =>
+                                setSwapTarget({ dayNumber: today!.day_number, routineExerciseId: ex.id })
+                              }
+                              style={styles.exerciseSwapBtn}
+                              accessibilityLabel={`Swap ${displayName}`}
+                            >
+                              <Repeat size={14} color={colors.primaryLight} />
+                            </PressableScale>
+                            {isSwapped && (
+                              <PressableScale
+                                haptic="selection"
+                                onPress={() =>
+                                  swapMutation.mutate({
+                                    day_number: today!.day_number,
+                                    routine_exercise_id: ex.id,
+                                    exercise_id: ex.exercise,
+                                  })
+                                }
+                                style={styles.exerciseRevertBtn}
+                                accessibilityLabel={`Revert ${displayName} to recommended exercise`}
+                              >
+                                <RotateCcw size={13} color={colors.textMuted} />
+                              </PressableScale>
+                            )}
+                          </View>
                         )}
-                      </View>
-                      <Text style={styles.exerciseNameText} numberOfLines={1}>
-                        {ex.exercise_name}
-                      </Text>
-                      <View style={styles.setsPill}>
-                        <Text style={styles.setsPillText}>
-                          {ex.target_sets} × {ex.target_reps}
-                        </Text>
-                      </View>
-                    </Animated.View>
-                  ))}
+                      </Animated.View>
+                    );
+                  })}
 
                   {hiddenCount > 0 && (
                     <PressableScale
@@ -415,13 +493,36 @@ export default function WorkoutsScreen() {
               )}
 
               {exercises.length > 0 && !isDone ? (
-                <Button
-                  title="Start & log this workout"
-                  icon={<Dumbbell size={18} color="#FFFFFF" />}
-                  iconPosition="left"
-                  onPress={() => router.push({ pathname: '/workout/log', params: { plan: '1' } })}
-                  style={styles.todayAction}
-                />
+                <>
+                  <Button
+                    title="Start & log this workout"
+                    icon={<Dumbbell size={18} color="#FFFFFF" />}
+                    iconPosition="left"
+                    onPress={() => router.push({ pathname: '/workout/log', params: { plan: '1' } })}
+                    style={styles.todayAction}
+                  />
+                  <View style={styles.todayQuickActionsRow}>
+                    <PressableScale
+                      haptic="selection"
+                      onPress={() => router.push('/workout/log')}
+                      style={styles.todayQuickActionBtn}
+                      accessibilityLabel="Log a different or custom workout"
+                    >
+                      <Plus size={14} color={colors.primaryLight} strokeWidth={2.4} />
+                      <Text style={styles.todayQuickActionBtnText}>Different workout</Text>
+                    </PressableScale>
+
+                    <PressableScale
+                      haptic="selection"
+                      onPress={() => setActiveDayModal(todayKey)}
+                      style={styles.todayQuickActionBtn}
+                      accessibilityLabel="Skip workout or mark rest day"
+                    >
+                      <SkipForward size={14} color={colors.amber} strokeWidth={2.4} />
+                      <Text style={styles.todayQuickActionBtnText}>Skip / Rest day</Text>
+                    </PressableScale>
+                  </View>
+                </>
               ) : (
                 <Button
                   title={isDone ? 'Log another workout' : 'Log a workout'}
@@ -635,6 +736,11 @@ export default function WorkoutsScreen() {
           </Animated.View>
         )}
 
+        {/* Cardio (collapsed by default so it doesn't crowd today's exercises) */}
+        <Animated.View entering={enter(2)}>
+          <CardioSection />
+        </Animated.View>
+
         {/* Daily Logs & History */}
         <Animated.View entering={enter(2)}>
           <View style={styles.sectionHeaderRow}>
@@ -745,6 +851,20 @@ export default function WorkoutsScreen() {
           }}
         />
       )}
+
+      <ExercisePicker
+        visible={!!swapTarget}
+        selectedIds={exercises.map((ex) => ex.swap?.exercise ?? ex.exercise)}
+        onClose={() => setSwapTarget(null)}
+        onPick={(picked) => {
+          if (!swapTarget) return;
+          swapMutation.mutate({
+            day_number: swapTarget.dayNumber,
+            routine_exercise_id: swapTarget.routineExerciseId,
+            exercise_id: picked.id,
+          });
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -909,33 +1029,40 @@ function SkippedDayRow({
   const styles = useStyles();
 
   return (
-    <Card style={styles.historyCard} onPress={onPress} accessibilityHint="Opens day options">
+    <Card style={styles.historyCard}>
       <View style={styles.historyRow}>
-        <View style={[styles.dateTile, styles.dateTileSkipped]}>
-          <Text style={[styles.dateTileMonth, { color: colors.warning }]}>
-            {date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}
-          </Text>
-          <Text style={styles.dateTileDay}>{date.getDate()}</Text>
-          {programDayNum ? (
-            <View style={[styles.dateTileProgramBadge, { backgroundColor: colors.amberGlow }]}>
-              <Text style={[styles.dateTileProgramText, { color: colors.warning }]}>D{programDayNum}</Text>
-            </View>
-          ) : null}
-        </View>
-        <View style={styles.historyInfo}>
-          <View style={styles.historyBadgeRow}>
-            <Badge label="Skipped" tone="amber" />
+        <PressableScale
+          onPress={onPress}
+          scaleTo={0.99}
+          accessibilityHint="Opens day options"
+          style={styles.historyMainPressable}
+        >
+          <View style={[styles.dateTile, styles.dateTileSkipped]}>
+            <Text style={[styles.dateTileMonth, { color: colors.warning }]}>
+              {date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}
+            </Text>
+            <Text style={styles.dateTileDay}>{date.getDate()}</Text>
             {programDayNum ? (
-              <Text style={[styles.dayInlineTag, { color: colors.warning }]}>Day {programDayNum}</Text>
+              <View style={[styles.dateTileProgramBadge, { backgroundColor: colors.amberGlow }]}>
+                <Text style={[styles.dateTileProgramText, { color: colors.warning }]}>D{programDayNum}</Text>
+              </View>
             ) : null}
           </View>
-          <Text style={styles.historyTitle} numberOfLines={1}>
-            {dayInfo?.program_day?.routine_name ? `${dayInfo.program_day.routine_name} (Skipped)` : 'Skipped Workout'}
-          </Text>
-          <Text style={styles.historyMeta} numberOfLines={1}>
-            {formatDayLabel(dateKey)} · {dayInfo?.notes || 'Missed workout'}
-          </Text>
-        </View>
+          <View style={styles.historyInfo}>
+            <View style={styles.historyBadgeRow}>
+              <Badge label="Skipped" tone="amber" />
+              {programDayNum ? (
+                <Text style={[styles.dayInlineTag, { color: colors.warning }]}>Day {programDayNum}</Text>
+              ) : null}
+            </View>
+            <Text style={styles.historyTitle} numberOfLines={1}>
+              {dayInfo?.program_day?.routine_name ? `${dayInfo.program_day.routine_name} (Skipped)` : 'Skipped Workout'}
+            </Text>
+            <Text style={styles.historyMeta} numberOfLines={1}>
+              {formatDayLabel(dateKey)} · {dayInfo?.notes || 'Missed workout'}
+            </Text>
+          </View>
+        </PressableScale>
         <PressableScale
           onPress={onLogWorkout}
           style={styles.logPillBtn}
@@ -966,33 +1093,40 @@ function OpenDayRow({
   const styles = useStyles();
 
   return (
-    <Card style={styles.historyCard} onPress={onPress} accessibilityHint="Opens day options">
+    <Card style={styles.historyCard}>
       <View style={styles.historyRow}>
-        <View style={styles.dateTile}>
-          <Text style={styles.dateTileMonth}>
-            {date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}
-          </Text>
-          <Text style={styles.dateTileDay}>{date.getDate()}</Text>
-          {programDayNum ? (
-            <View style={styles.dateTileProgramBadge}>
-              <Text style={styles.dateTileProgramText}>D{programDayNum}</Text>
-            </View>
-          ) : null}
-        </View>
-        <View style={styles.historyInfo}>
-          <View style={styles.historyBadgeRow}>
-            <Badge label="Open Day" tone="slate" />
+        <PressableScale
+          onPress={onPress}
+          scaleTo={0.99}
+          accessibilityHint="Opens day options"
+          style={styles.historyMainPressable}
+        >
+          <View style={styles.dateTile}>
+            <Text style={styles.dateTileMonth}>
+              {date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}
+            </Text>
+            <Text style={styles.dateTileDay}>{date.getDate()}</Text>
             {programDayNum ? (
-              <Text style={styles.dayInlineTag}>Day {programDayNum}</Text>
+              <View style={styles.dateTileProgramBadge}>
+                <Text style={styles.dateTileProgramText}>D{programDayNum}</Text>
+              </View>
             ) : null}
           </View>
-          <Text style={styles.historyTitle} numberOfLines={1}>
-            No Workout Logged
-          </Text>
-          <Text style={styles.historyMeta} numberOfLines={1}>
-            {formatDayLabel(dateKey)} · Tap to record or mark rest
-          </Text>
-        </View>
+          <View style={styles.historyInfo}>
+            <View style={styles.historyBadgeRow}>
+              <Badge label="Open Day" tone="slate" />
+              {programDayNum ? (
+                <Text style={styles.dayInlineTag}>Day {programDayNum}</Text>
+              ) : null}
+            </View>
+            <Text style={styles.historyTitle} numberOfLines={1}>
+              No Workout Logged
+            </Text>
+            <Text style={styles.historyMeta} numberOfLines={1}>
+              {formatDayLabel(dateKey)} · Tap to record or mark rest
+            </Text>
+          </View>
+        </PressableScale>
         <PressableScale
           onPress={onLogWorkout}
           style={styles.logPillBtnSecondary}
@@ -1058,6 +1192,30 @@ const useStyles = makeStyles(({ colors }) => ({
   todayAction: {
     marginTop: spacing.md,
   },
+  todayQuickActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  todayQuickActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  todayQuickActionBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
   loadMoreBtn: {
     marginTop: spacing.xs,
   },
@@ -1119,7 +1277,7 @@ const useStyles = makeStyles(({ colors }) => ({
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
+    alignItems: 'center',
     marginTop: spacing.lg,
     marginBottom: spacing.sm,
   },
@@ -1128,6 +1286,20 @@ const useStyles = makeStyles(({ colors }) => ({
     fontWeight: '800',
     color: colors.textPrimary,
     letterSpacing: -0.3,
+  },
+  dayOptionsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    backgroundColor: colors.primarySurface,
+  },
+  dayOptionsBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primaryLight,
   },
   sectionMeta: {
     fontSize: 12,
@@ -1198,11 +1370,42 @@ const useStyles = makeStyles(({ colors }) => ({
     fontWeight: '800',
     color: colors.textSecondary,
   },
-  exerciseNameText: {
+  exerciseNameCol: {
     flex: 1,
+  },
+  exerciseNameText: {
     fontSize: 15,
     fontWeight: '600',
     color: colors.textPrimary,
+  },
+  swappedTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.warning,
+    marginTop: 1,
+  },
+  exerciseActionsInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  exerciseSwapBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.full,
+    backgroundColor: colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exerciseRevertBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   setsPill: {
     backgroundColor: colors.surface,
@@ -1240,6 +1443,12 @@ const useStyles = makeStyles(({ colors }) => ({
     marginBottom: spacing.sm,
   },
   historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  historyMainPressable: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,

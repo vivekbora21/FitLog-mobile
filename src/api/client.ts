@@ -119,6 +119,7 @@ export interface RecentExercise {
   id: string;
   name: string;
   primary_muscle_name: string;
+  primary_muscle_slug: string;
   last_date: string;
 }
 
@@ -470,6 +471,17 @@ class ApiClient {
     return this.post('/workouts/sessions/update-program-day/', payload);
   }
 
+  // Overrides which exercise fills a routine slot for one specific program day, without
+  // mutating the shared Routine template. Sending the slot's own original exercise id
+  // clears the override. Returns the updated ProgramDay (same shape as plan.days[]/today.today).
+  async swapExercise(payload: {
+    day_number: number;
+    routine_exercise_id: string;
+    exercise_id: string;
+  }): Promise<ProgramDay> {
+    return this.post<ProgramDay>('/workouts/sessions/swap-exercise/', payload);
+  }
+
   // Workouts
   async getTodaysWorkout(): Promise<{
     program?: {
@@ -645,6 +657,14 @@ class ApiClient {
   // Time-based exercises (treadmill, cycling, rowing, etc.) log here instead of as reps/weight sets.
   async createCardioEntry(entry: CardioEntryPayload): Promise<CardioEntry> {
     return this.post<CardioEntry>('/workouts/cardio/', entry);
+  }
+
+  async getCardioEntries(): Promise<CardioEntry[]> {
+    return unwrapList(await this.get('/workouts/cardio/'));
+  }
+
+  async deleteCardioEntry(id: string): Promise<void> {
+    await this.delete(`/workouts/cardio/${id}/`);
   }
 
   // Daily log (steps / sleep / energy) — POST upserts by date on the server.

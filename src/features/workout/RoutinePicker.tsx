@@ -42,15 +42,15 @@ export function RoutinePicker({
     enabled: visible,
   });
 
-  const { data: sessionPages, isLoading: isSessionsLoading } = useQuery({
-    queryKey: ['workoutSessions'],
+  const { data: sessionsData, isLoading: isSessionsLoading } = useQuery({
+    queryKey: ['workoutSessions', 'recent'],
     queryFn: () => api.getWorkoutSessions(),
     enabled: visible && tab === 'history',
   });
 
   const planDays = planData?.days || [];
   const routines = routinesData || [];
-  const recentSessions: WorkoutSession[] = (sessionPages || []).slice(0, 10);
+  const recentSessions: WorkoutSession[] = (sessionsData || []).slice(0, 10);
 
   const handlePickRoutine = (routine: { id: string; name: string; exercises?: any[] }) => {
     haptics.success();

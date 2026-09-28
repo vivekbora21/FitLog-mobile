@@ -84,6 +84,18 @@ export interface RoutineExercise {
   suggested_weight_kg?: number | null;
   focus?: string;
   progression?: ProgressionRecommendation | null;
+  /**
+   * Per-program-day override of which exercise fills this routine slot (see
+   * ProgramDayExerciseSwap on the backend). Null when the day is using the
+   * routine's recommended exercise as-is. target_sets/target_reps/etc. above
+   * always describe the original prescription; only exercise identity changes.
+   */
+  swap?: {
+    id: string;
+    exercise: string;
+    exercise_name: string;
+    primary_muscle: string | null;
+  } | null;
 }
 
 /** Server-computed next-session prescription (backend/workouts/progression.py). */
@@ -117,6 +129,14 @@ export interface WorkoutSet {
   reps: number;
   rpe?: number | null;
   completed: boolean;
+  duration_seconds?: number | null;
+  distance_km?: number | null;
+  incline_percent?: number | null;
+  speed_kmh?: number | null;
+  resistance_level?: number | null;
+  calories?: number | null;
+  heart_rate?: number | null;
+  intensity?: string;
 }
 
 export interface WorkoutExercise {
@@ -241,10 +261,18 @@ export interface NutritionDay {
   total_fat: number;
 }
 
+export interface NutritionPlanInfo {
+  mode: JourneyMode | 'MAINTAIN';
+  mode_label: string;
+  target_type: 'MAX' | 'MIN' | 'TARGET';
+  program_name?: string | null;
+}
+
 export interface NutritionDayResponse {
   day: NutritionDay;
   targets: MacroTarget;
   yesterday_meals?: MealEntry[];
+  plan?: NutritionPlanInfo;
 }
 
 export interface NutritionHistoryDay {
@@ -272,6 +300,8 @@ export interface NutritionHistoryDay {
   target_carbs: number;
   target_fat: number;
   target_water: number;
+  target_type?: 'MAX' | 'MIN' | 'TARGET';
+  mode?: JourneyMode | 'MAINTAIN';
 }
 
 export interface NutritionHistoryResponse {
@@ -281,7 +311,10 @@ export interface NutritionHistoryResponse {
     start_date?: string | null;
     duration_days: number;
     name: string;
+    mode?: JourneyMode | string;
+    target_type?: 'MAX' | 'MIN' | 'TARGET';
   } | null;
+  plan?: NutritionPlanInfo;
 }
 
 export interface MacroTarget {

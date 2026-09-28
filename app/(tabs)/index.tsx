@@ -132,10 +132,15 @@ export default function DashboardScreen() {
   const exerciseCount = routineDetails?.exercises?.length || 0;
   const isWorkoutDone = today?.status === 'COMPLETED';
 
+  const journeyMode = stats?.journey?.mode || (user?.profile?.fitness_goal === 'FAT_LOSS' ? 'CUT' : (user?.profile?.fitness_goal === 'HYPERTROPHY' || user?.profile?.fitness_goal === 'STRENGTH') ? 'BULK' : 'CUT');
+  const isBulk = journeyMode === 'BULK';
+  const isCut = journeyMode === 'CUT';
+
   const calConsumed = nutrition?.calories_consumed || 0;
   const calTarget = nutrition?.calories_target || 0;
   const calPct = calculateMacroPercentage(calConsumed, calTarget);
-  const calRemaining = Math.max(0, calTarget - calConsumed);
+  const calDiff = calConsumed - calTarget;
+  const calRemaining = calTarget - calConsumed;
 
   const macros = [
     {
@@ -267,15 +272,35 @@ export default function DashboardScreen() {
           >
             <View style={styles.heroRow}>
               <ProgressRing
-                percentage={calPct}
+                percentage={isBulk && calConsumed >= calTarget ? 100 : Math.min(100, Math.max(0, calPct))}
                 size={132}
                 strokeWidth={12}
-                color={colors.primaryLight}
-                gradientTo={colors.cyan}
+                color={isBulk ? (calConsumed >= calTarget ? colors.success : colors.amber) : isCut && calDiff > 0 ? colors.warning : colors.primaryLight}
+                gradientTo={isBulk ? (calConsumed >= calTarget ? colors.cyan : colors.primaryLight) : isCut && calDiff > 0 ? colors.rose : colors.cyan}
                 delay={250}
               >
-                <Text style={styles.ringValue}>{formatNumber(calRemaining)}</Text>
-                <Text style={styles.ringLabel}>kcal left</Text>
+                <Text
+                  style={[
+                    styles.ringValue,
+                    isBulk && calConsumed >= calTarget && { color: colors.success },
+                    isCut && calDiff > 0 && { color: colors.warning },
+                  ]}
+                >
+                  {isBulk
+                    ? (calConsumed >= calTarget ? (calDiff > 0 ? `+${formatNumber(calDiff)}` : 'Hit!') : formatNumber(Math.max(0, calRemaining)))
+                    : formatNumber(Math.abs(calRemaining))}
+                </Text>
+                <Text
+                  style={[
+                    styles.ringLabel,
+                    isBulk && calConsumed >= calTarget && { color: colors.success },
+                    isCut && calDiff > 0 && { color: colors.warning },
+                  ]}
+                >
+                  {isBulk
+                    ? (calConsumed >= calTarget ? 'surplus met!' : 'kcal needed (min)')
+                    : (calRemaining >= 0 ? 'kcal left (max)' : 'kcal over max')}
+                </Text>
               </ProgressRing>
 
               <View style={styles.macroCol}>
@@ -300,7 +325,7 @@ export default function DashboardScreen() {
             </View>
             <View style={styles.heroFooter}>
               <Text style={styles.heroFooterText}>
-                {formatNumber(calConsumed)} of {formatNumber(calTarget)} kcal eaten
+                {formatNumber(calConsumed)} of {isBulk ? `min ${formatNumber(calTarget)}` : isCut ? `max ${formatNumber(calTarget)}` : formatNumber(calTarget)} kcal eaten
               </Text>
               <ChevronRight size={16} color={colors.textMuted} />
             </View>

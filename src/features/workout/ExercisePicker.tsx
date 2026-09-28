@@ -70,7 +70,7 @@ export function ExercisePicker({ visible, onClose, onPick, selectedIds }: Props)
   };
 
   const rows: Row[] = browsing
-    ? (recent.data ?? []).map((r) => ({ id: r.id, name: r.name, muscle: r.primary_muscle_name, meta: `${r.primary_muscle_name} · ${formatRelativeDay(r.last_date)}` }))
+    ? (recent.data ?? []).map((r) => ({ id: r.id, name: r.name, muscle: r.primary_muscle_name, muscleSlug: r.primary_muscle_slug, meta: `${r.primary_muscle_name} · ${formatRelativeDay(r.last_date)}` }))
     : (results.data ?? []).map((e) => ({
         id: e.id,
         name: e.name,

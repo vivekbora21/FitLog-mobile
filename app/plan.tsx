@@ -15,8 +15,10 @@ import {
   Moon,
   FastForward,
   RotateCcw,
+  Repeat,
 } from 'lucide-react-native';
 import { api, extractErrorMessage, type ProgramDay } from '../src/api/client';
+import { ExercisePicker } from '../src/features/workout/ExercisePicker';
 import {
   Badge,
   Button,
@@ -86,14 +88,34 @@ export default function PlanScreen() {
     },
   });
 
+  // Swapping a recommended exercise for a specific program day (doesn't touch the shared
+  // Routine template other days may reuse). workouts.tsx's "Today's session" card reads
+  // from the same today/plan API data and renders the resulting `swap` field the same way.
+  const [swapTarget, setSwapTarget] = useState<{ dayNumber: number; routineExerciseId: string } | null>(null);
+  const swapMutation = useMutation({
+    mutationFn: (payload: { day_number: number; routine_exercise_id: string; exercise_id: string }) =>
+      api.swapExercise(payload),
+    onSuccess: () => {
+      haptics.success();
+      queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
+      queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
+      setSwapTarget(null);
+    },
+    onError: (err) => {
+      haptics.error();
+      Alert.alert("Couldn't swap exercise", extractErrorMessage(err));
+    },
+  });
+
+  const programStartDate = program?.start_date ?? null;
   const planDayDate = useMemo(() => {
-    if (!program?.start_date) return null;
-    const parts = program.start_date.split('-');
+    if (!programStartDate) return null;
+    const parts = programStartDate.split('-');
     if (parts.length !== 3) return null;
     const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
     d.setDate(d.getDate() + (shownDay - 1));
     return toDateKey(d);
-  }, [program?.start_date, shownDay]);
+  }, [programStartDate, shownDay]);
 
   const selectedDayDate = useMemo(() => {
     return getProgramDayDate(program?.start_date, shownDay);
@@ -336,14 +358,21 @@ export default function PlanScreen() {
 
                 {exercises.map((ex, i) => {
                   const load = plannedLoad(ex);
+                  const displayName = ex.swap?.exercise_name || ex.exercise_name;
+                  const isSwapped = !!ex.swap;
                   return (
                     <View key={ex.id} style={[styles.exRow, i > 0 && styles.exRowBorder]}>
                       <View style={styles.exIndex}>
                         <Text style={styles.exIndexText}>{i + 1}</Text>
                       </View>
                       <View style={styles.exBody}>
-                        <Text style={styles.exName}>{ex.exercise_name}</Text>
-                        <Text style={styles.exFocus}>{ex.focus || ex.primary_muscle}</Text>
+                        <View style={styles.exNameRow}>
+                          <Text style={styles.exName}>{displayName}</Text>
+                          {isSwapped && <Badge label="Swapped" tone="amber" />}
+                        </View>
+                        <Text style={styles.exFocus}>
+                          {isSwapped ? ex.swap?.primary_muscle || ex.focus : ex.focus || ex.primary_muscle}
+                        </Text>
                         <View style={styles.exStats}>
                           <Stat label="Sets" value={`${ex.target_sets} × ${ex.target_reps}`} />
                           <Stat label="Rest" value={`${ex.rest_seconds}s`} />
@@ -351,6 +380,34 @@ export default function PlanScreen() {
                           <Stat label="Load" value={load ? `${load} kg` : '--'} />
                         </View>
                         {ex.notes ? <Text style={styles.exNote}>{ex.notes}</Text> : null}
+                        <View style={styles.exActionsRow}>
+                          <PressableScale
+                            haptic="selection"
+                            onPress={() => setSwapTarget({ dayNumber: shownDay, routineExerciseId: ex.id })}
+                            style={styles.swapBtn}
+                            accessibilityLabel={`Swap ${displayName}`}
+                          >
+                            <Repeat size={13} color={colors.primaryLight} />
+                            <Text style={styles.swapBtnText}>Swap</Text>
+                          </PressableScale>
+                          {isSwapped && (
+                            <PressableScale
+                              haptic="selection"
+                              onPress={() =>
+                                swapMutation.mutate({
+                                  day_number: shownDay,
+                                  routine_exercise_id: ex.id,
+                                  exercise_id: ex.exercise,
+                                })
+                              }
+                              style={styles.revertBtn}
+                              accessibilityLabel={`Revert ${displayName} to recommended exercise`}
+                            >
+                              <RotateCcw size={13} color={colors.textMuted} />
+                              <Text style={styles.revertBtnText}>Revert</Text>
+                            </PressableScale>
+                          )}
+                        </View>
                       </View>
                     </View>
                   );
@@ -461,6 +518,20 @@ export default function PlanScreen() {
           </>
         )}
       </ScrollView>
+
+      <ExercisePicker
+        visible={!!swapTarget}
+        selectedIds={exercises.map((ex) => ex.swap?.exercise ?? ex.exercise)}
+        onClose={() => setSwapTarget(null)}
+        onPick={(picked) => {
+          if (!swapTarget) return;
+          swapMutation.mutate({
+            day_number: swapTarget.dayNumber,
+            routine_exercise_id: swapTarget.routineExerciseId,
+            exercise_id: picked.id,
+          });
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -687,10 +758,50 @@ const useStyles = makeStyles(({ colors }) => ({
   exBody: {
     flex: 1,
   },
+  exNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   exName: {
     fontSize: 15,
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  exActionsRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  swapBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.primarySurface,
+  },
+  swapBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primaryLight,
+  },
+  revertBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  revertBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
   },
   exFocus: {
     fontSize: 12,

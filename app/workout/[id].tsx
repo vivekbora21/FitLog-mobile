@@ -11,6 +11,7 @@ import type { WorkoutSession } from '../../src/types';
 import { formatDuration, formatVolume } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
+import { isCardioExercise } from '../../src/features/workout/draft';
 
 const SET_TYPE_LABEL: Record<string, string> = { WARMUP: 'Warm-up', DROP: 'Drop', FAILURE: 'Failure' };
 
@@ -128,27 +129,51 @@ export default function WorkoutDetailScreen() {
           </Card>
         ) : null}
 
-        {(session.exercises ?? []).map((ex, i) => (
-          <Card key={ex.id ?? i} style={styles.exerciseCard}>
-            <Text style={styles.exerciseName}>{ex.exercise_name}</Text>
-            {ex.primary_muscle ? <Text style={styles.exerciseMuscle}>{ex.primary_muscle}</Text> : null}
-            {(ex.sets ?? []).map((s) => (
-              <View key={s.id ?? s.set_number} style={styles.setRow}>
-                <Text style={styles.setNum}>
-                  {s.set_type && s.set_type !== 'NORMAL' ? SET_TYPE_LABEL[s.set_type] : `Set ${s.set_number}`}
-                </Text>
-                <Text style={styles.setValue}>
-                  {s.weight_kg} kg × {s.reps}
-                </Text>
-                {s.completed ? (
-                  <Check size={16} color={colors.primaryLight} strokeWidth={3} />
-                ) : (
-                  <View style={styles.checkPlaceholder} />
+        {(session.exercises ?? []).map((ex, i) => {
+          const isCardio = isCardioExercise(ex.exercise_name, ex.primary_muscle);
+          return (
+            <Card key={ex.id ?? i} style={styles.exerciseCard}>
+              <View style={styles.exerciseHeaderRow}>
+                <Text style={styles.exerciseName}>{ex.exercise_name}</Text>
+                {isCardio && (
+                  <View style={styles.cardioBadge}>
+                    <Text style={styles.cardioBadgeText}>Cardio</Text>
+                  </View>
                 )}
               </View>
-            ))}
-          </Card>
-        ))}
+              {ex.primary_muscle ? <Text style={styles.exerciseMuscle}>{ex.primary_muscle}</Text> : null}
+              {(ex.sets ?? []).map((s) => {
+                const isCardioSet = isCardio || !!s.duration_seconds || s.incline_percent !== null && s.incline_percent !== undefined;
+                const cardioText = isCardioSet
+                  ? [
+                      s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : null,
+                      s.incline_percent !== null && s.incline_percent !== undefined ? `${s.incline_percent}% Incline` : null,
+                      s.speed_kmh ? `${s.speed_kmh} km/h` : null,
+                      s.intensity || null,
+                    ].filter(Boolean).join(' · ') || (s.reps ? `${s.reps} min` : 'Completed')
+                  : `${s.weight_kg} kg × ${s.reps}`;
+
+                return (
+                  <View key={s.id ?? s.set_number} style={styles.setRow}>
+                    <Text style={styles.setNum}>
+                      {isCardioSet
+                        ? `Interval ${s.set_number}`
+                        : s.set_type && s.set_type !== 'NORMAL'
+                        ? SET_TYPE_LABEL[s.set_type]
+                        : `Set ${s.set_number}`}
+                    </Text>
+                    <Text style={styles.setValue}>{cardioText}</Text>
+                    {s.completed ? (
+                      <Check size={16} color={colors.primaryLight} strokeWidth={3} />
+                    ) : (
+                      <View style={styles.checkPlaceholder} />
+                    )}
+                  </View>
+                );
+              })}
+            </Card>
+          );
+        })}
 
         {(session.exercises?.length ?? 0) === 0 && (
           <Text style={styles.emptyText}>No exercises were recorded for this session.</Text>
@@ -264,6 +289,23 @@ const useStyles = makeStyles(({ colors }) => ({
   },
   exerciseCard: {
     padding: spacing.md,
+  },
+  exerciseHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cardioBadge: {
+    backgroundColor: colors.primarySurface,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+  },
+  cardioBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.primaryLight,
+    textTransform: 'uppercase',
   },
   exerciseName: {
     fontSize: 15,
