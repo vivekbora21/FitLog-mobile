@@ -1,98 +1,28 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, Alert } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, BackHandler, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, Dumbbell, Flame, Play, Scale, Target, TrendingDown, TrendingUp, Zap } from 'lucide-react-native';
+import { ChevronLeft, Pencil, Play } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
-import { Button, ChipGroup, Input, PressableScale, SheetScreen } from '../src/components/ui';
-import { radius, spacing, makeStyles, useTheme } from '../src/theme';
-import { parseNumberInput } from '../src/lib/format';
+import { Button, ProgressBar, SheetScreen } from '../src/components/ui';
+import { spacing, makeStyles, useTheme } from '../src/theme';
+import { calculateAge, parseNumberInput } from '../src/lib/format';
 import { haptics } from '../src/lib/haptics';
 import { useAuth } from '../src/providers/auth';
-import type { JourneyMode } from '../src/types';
+import type { Blueprint, JourneyMode, PlanPreviewPayload } from '../src/types';
+import {
+  DetailsStep,
+  MODE_META_BY_MODE,
+  ModeStep,
+  PathChoiceStep,
+  RoadmapPreview,
+  defaultWizardDetails,
+  validateDetails,
+  type WizardDetails,
+  type WizardPath,
+} from '../src/components/plan-wizard';
 
-interface Blueprint {
-  id: string;
-  name: string;
-  mode: JourneyMode;
-  modeLabel: string;
-  /** Palette key, resolved against the active theme when rendered. */
-  color: 'rose' | 'violet' | 'cyan' | 'amber';
-  Icon: typeof Flame;
-  durationDays: number;
-  description: string;
-  pacing: string;
-  targetDeltaKg: number;
-}
-
-// Mirrors the web PlanSelectorModal blueprints; the backend recognises these ids.
-const BLUEPRINTS: Blueprint[] = [
-  {
-    id: 'CUT_60',
-    name: '60-Day Recomp & Shred',
-    mode: 'CUT',
-    modeLabel: 'Cut',
-    color: 'rose',
-    Icon: Flame,
-    durationDays: 60,
-    description: 'Strip body fat and reveal definition while locking in compound anchor strength.',
-    pacing: '-0.5 kg / week',
-    targetDeltaKg: -4.3,
-  },
-  {
-    id: 'BULK_90',
-    name: '90-Day Mass Architecture',
-    mode: 'BULK',
-    modeLabel: 'Bulk',
-    color: 'violet',
-    Icon: Dumbbell,
-    durationDays: 90,
-    description: 'Clean surplus pacing to maximise hypertrophy without excess fat gain.',
-    pacing: '+0.3 kg / week',
-    targetDeltaKg: 3.8,
-  },
-  {
-    id: 'FOCUS_30',
-    name: '30-Day Strength Peak',
-    mode: 'FOCUS',
-    modeLabel: 'Focus',
-    color: 'cyan',
-    Icon: Target,
-    durationDays: 30,
-    description: 'Heavy compound progression (RPE 8.5–9.5) to break plateaus and set PRs.',
-    pacing: 'Weight neutral',
-    targetDeltaKg: 0,
-  },
-  {
-    id: 'HABIT_21',
-    name: '21-Day Habit Lock-in',
-    mode: 'HABIT',
-    modeLabel: 'Habit',
-    color: 'amber',
-    Icon: Zap,
-    durationDays: 21,
-    description: '3 full-body sessions a week focused on consistency and routine momentum.',
-    pacing: 'Consistency first',
-    targetDeltaKg: 0,
-  },
-];
-
-const MODE_OPTIONS: { value: JourneyMode; label: string }[] = [
-  { value: 'CUT', label: 'Cut' },
-  { value: 'BULK', label: 'Bulk' },
-  { value: 'FOCUS', label: 'Focus' },
-  { value: 'RECOMP', label: 'Recomp' },
-  { value: 'HABIT', label: 'Habit' },
-];
-
-const MODE_TARGET_DELTA: Record<JourneyMode, number> = { CUT: -4, BULK: 3, FOCUS: 0, RECOMP: -1.5, HABIT: 0 };
-const DURATION_PRESETS = [21, 30, 45, 60, 90, 120].map((d) => ({ value: d, label: `${d}d` }));
-
-// Mirrors JourneyProgram.MIN_DURATION_DAYS / MAX_DURATION_DAYS on the backend.
-const MIN_PLAN_DAYS = 7;
-const MAX_PLAN_DAYS = 365;
-
-const round1 = (n: number) => Number(n.toFixed(1));
+const STEP_COUNT = 4;
 
 export default function PlanSelectScreen() {
   const { colors } = useTheme();
@@ -100,53 +30,74 @@ export default function PlanSelectScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, refreshUser } = useAuth();
+  const profile = user?.profile;
+
   const planQuery = useQuery({ queryKey: ['workoutPlan'], queryFn: () => api.getWorkoutPlan() });
   const hasActivePlan = !!planQuery.data?.program;
 
-  const initialWeight = user?.profile?.weight_kg ?? planQuery.data?.program?.start_weight_kg ?? null;
+  const [step, setStep] = useState(0);
+  const [path, setPath] = useState<WizardPath | null>(null);
+  const [mode, setMode] = useState<JourneyMode | null>(null);
+  const [blueprintSlug, setBlueprintSlug] = useState<string | null>(null);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<'blueprints' | 'custom'>('blueprints');
-  const [blueprintId, setBlueprintId] = useState('CUT_60');
-  const [startWeight, setStartWeight] = useState(initialWeight ? String(initialWeight) : '');
-  const [mode, setMode] = useState<JourneyMode>('CUT');
-  const [name, setName] = useState('');
-  const [days, setDays] = useState('60');
-  const [targetWeight, setTargetWeight] = useState(initialWeight ? String(round1(initialWeight - 4)) : '');
+  const [details, setDetails] = useState<WizardDetails>(() =>
+    defaultWizardDetails({
+      currentWeight: profile?.weight_kg != null ? String(profile.weight_kg) : '',
+      height: profile?.height_cm != null ? String(profile.height_cm) : '',
+      age: (() => {
+        const a = calculateAge(profile?.date_of_birth);
+        return a != null ? String(a) : '';
+      })(),
+      sex: (profile?.sex as 'MALE' | 'FEMALE') || null,
+    })
+  );
 
-  const startKg = parseNumberInput(startWeight);
-  const targetKg = parseNumberInput(targetWeight);
-  const dayCount = parseNumberInput(days);
+  const patchDetails = (patch: Partial<WizardDetails>) => setDetails((prev) => ({ ...prev, ...patch }));
 
-  const velocity = useMemo(() => {
-    if (!startKg || !targetKg || !dayCount || dayCount <= 0) return 0;
-    return Number(((targetKg - startKg) / (dayCount / 7)).toFixed(2));
-  }, [startKg, targetKg, dayCount]);
+  const blueprintsQuery = useQuery({
+    queryKey: ['blueprints'],
+    queryFn: () => api.getBlueprints(),
+    enabled: path === 'blueprint',
+  });
+
+  const onChangeMode = (m: JourneyMode, bp: Blueprint | null) => {
+    setMode(m);
+    setBlueprintSlug(bp?.slug ?? null);
+    if (bp) {
+      patchDetails({ duration: String(bp.default_duration_days), daysPerWeek: bp.default_days_per_week });
+    }
+  };
+
+  const buildPreviewPayload = (): PlanPreviewPayload => ({
+    blueprint_slug: path === 'blueprint' ? blueprintSlug ?? undefined : undefined,
+    mode: path === 'custom' ? mode ?? undefined : undefined,
+    duration_days: Math.round(parseNumberInput(details.duration) ?? 0),
+    days_per_week: details.daysPerWeek,
+    weekdays: details.weekdays,
+    current_weight_kg: parseNumberInput(details.currentWeight) ?? 0,
+    goal_weight_kg: parseNumberInput(details.goalWeight) ?? undefined,
+    height_cm: parseNumberInput(details.height) ?? 0,
+    age: Math.round(parseNumberInput(details.age) ?? 0),
+    sex: details.sex ?? 'MALE',
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: (payload: PlanPreviewPayload) => api.previewPlan(payload),
+  });
+
+  useEffect(() => {
+    if (step === 3) {
+      previewMutation.mutate(buildPreviewPayload());
+    }
+    // Only re-fetch when the user (re-)enters step 3, not on every keystroke in step 2.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const startMutation = useMutation({
-    mutationFn: () => {
-      if (tab === 'blueprints') {
-        const bp = BLUEPRINTS.find((b) => b.id === blueprintId)!;
-        return api.startJourney({
-          blueprint: bp.id,
-          name: bp.name,
-          mode: bp.mode,
-          duration_days: bp.durationDays,
-          start_weight_kg: startKg || undefined,
-          target_weight_kg: startKg ? round1(startKg + bp.targetDeltaKg) : undefined,
-        });
-      }
-      const length = Math.round(dayCount ?? 0);
-      return api.startJourney({
-        name: name.trim() || `${length}-Day ${mode} Plan`,
-        mode,
-        duration_days: length,
-        start_weight_kg: startKg || undefined,
-        target_weight_kg: targetKg || undefined,
-      });
-    },
+    mutationFn: () => api.createPlan(buildPreviewPayload()),
     onSuccess: async () => {
       haptics.success();
-      // A new journey reshapes targets, today's session and the dashboard, so refresh everything.
       await Promise.all([queryClient.invalidateQueries(), refreshUser()]);
       router.back();
     },
@@ -157,11 +108,6 @@ export default function PlanSelectScreen() {
   });
 
   const submit = () => {
-    if (tab === 'custom' && (!dayCount || dayCount < MIN_PLAN_DAYS || dayCount > MAX_PLAN_DAYS)) {
-      haptics.error();
-      Alert.alert('Check plan length', `Plan length must be between ${MIN_PLAN_DAYS} and ${MAX_PLAN_DAYS} days.`);
-      return;
-    }
     if (!hasActivePlan) {
       startMutation.mutate();
       return;
@@ -176,212 +122,189 @@ export default function PlanSelectScreen() {
     );
   };
 
-  const onModeChange = (m: JourneyMode) => {
-    setMode(m);
-    if (startKg) setTargetWeight(String(round1(startKg + MODE_TARGET_DELTA[m])));
+  const goBackStep = () => {
+    haptics.selection();
+    if (step === 0) {
+      router.back();
+      return;
+    }
+    setStep((s) => Math.max(0, s - 1));
   };
 
-  const weightIcon = <Scale size={18} color={colors.primaryLight} />;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (step > 0) {
+        setStep((s) => Math.max(0, s - 1));
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [step]);
 
-  return (
-    <SheetScreen
-      title="Choose your plan"
-      subtitle="Mode, length & goal weight"
-      footer={
+  const goNext = () => {
+    if (step === 0) {
+      if (!path) {
+        haptics.error();
+        return;
+      }
+      haptics.selection();
+      setStep(1);
+      return;
+    }
+    if (step === 1) {
+      if (!mode || (path === 'blueprint' && !blueprintSlug)) {
+        haptics.error();
+        return;
+      }
+      haptics.selection();
+      setStep(2);
+      return;
+    }
+    if (step === 2) {
+      const err = validateDetails(details, mode);
+      if (err) {
+        setDetailsError(err);
+        haptics.error();
+        return;
+      }
+      setDetailsError(null);
+      haptics.selection();
+      setStep(3);
+      return;
+    }
+    submit();
+  };
+
+  const canAdvance = useMemo(() => {
+    if (step === 0) return !!path;
+    if (step === 1) return !!mode && (path !== 'blueprint' || !!blueprintSlug);
+    return true;
+  }, [step, path, mode, blueprintSlug]);
+
+  const modeMeta = mode ? MODE_META_BY_MODE[mode] : null;
+
+  const summaryText =
+    step >= 2 && mode
+      ? `${modeMeta?.label ?? mode} · ${details.duration || '—'} days · ${details.daysPerWeek} days/wk`
+      : null;
+
+  const footer =
+    step === 3 ? (
+      <View style={styles.footerRow}>
+        <Button
+          title="Edit"
+          variant="secondary"
+          size="lg"
+          icon={<Pencil size={16} color={colors.textPrimary} />}
+          iconPosition="left"
+          onPress={() => setStep(2)}
+          style={styles.editBtn}
+        />
         <Button
           title="Start this plan"
           size="lg"
           icon={<Play size={18} color="#FFFFFF" />}
           iconPosition="left"
           loading={startMutation.isPending}
+          disabled={previewMutation.isPending || !previewMutation.data}
           onPress={submit}
+          style={styles.flex}
         />
-      }
-    >
-      <ChipGroup
-        options={[
-          { value: 'blueprints', label: 'Blueprints' },
-          { value: 'custom', label: 'Custom' },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
-
-      {tab === 'blueprints' ? (
-        <>
-          {BLUEPRINTS.map((bp) => {
-            const selected = bp.id === blueprintId;
-            return (
-              <PressableScale
-                key={bp.id}
-                haptic="selection"
-                scaleTo={0.98}
-                onPress={() => setBlueprintId(bp.id)}
-                style={[styles.bpCard, selected && styles.bpCardSelected]}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
-                accessibilityLabel={bp.name}
-              >
-                <View style={styles.bpHeader}>
-                  <View style={[styles.bpMode, { backgroundColor: `${colors[bp.color]}1F` }]}>
-                    <bp.Icon size={13} color={colors[bp.color]} />
-                    <Text style={[styles.bpModeText, { color: colors[bp.color] }]}>{bp.modeLabel}</Text>
-                  </View>
-                  <Text style={styles.bpDuration}>{bp.durationDays} days</Text>
-                </View>
-                <Text style={styles.bpName}>{bp.name}</Text>
-                <Text style={styles.bpDesc}>{bp.description}</Text>
-                <Text style={styles.bpPacing}>Pacing: {bp.pacing}</Text>
-              </PressableScale>
-            );
-          })}
-          <Input
-            label="Current weight (kg)"
-            placeholder="e.g. 77.5"
-            keyboardType="decimal-pad"
-            value={startWeight}
-            onChangeText={setStartWeight}
-            leftIcon={weightIcon}
-            containerStyle={styles.spaced}
-          />
-        </>
-      ) : (
-        <>
-          <ChipGroup label="Mode" options={MODE_OPTIONS} value={mode} onChange={onModeChange} />
-          <Input
-            label="Plan name (optional)"
-            placeholder={`e.g. My ${days || 60}-Day ${mode} Journey`}
-            value={name}
-            onChangeText={setName}
-          />
-          <Input
-            label={`Plan length (${MIN_PLAN_DAYS}–${MAX_PLAN_DAYS} days)`}
-            keyboardType="number-pad"
-            value={days}
-            onChangeText={setDays}
-          />
-          <ChipGroup options={DURATION_PRESETS} value={dayCount} onChange={(d) => setDays(String(d))} />
-          <View style={styles.row}>
-            <Input
-              label="Start weight (kg)"
-              keyboardType="decimal-pad"
-              value={startWeight}
-              onChangeText={setStartWeight}
-              containerStyle={styles.half}
+      </View>
+    ) : (
+      <View style={styles.footerCol}>
+        {summaryText ? <Text style={styles.summaryText}>{summaryText}</Text> : null}
+        <View style={styles.footerRow}>
+          {step > 0 ? (
+            <Button
+              title="Back"
+              variant="secondary"
+              size="lg"
+              onPress={goBackStep}
+              icon={<ChevronLeft size={18} color={colors.textPrimary} />}
+              iconPosition="left"
+              style={styles.backBtn}
             />
-            <Input
-              label="Target weight (kg)"
-              keyboardType="decimal-pad"
-              value={targetWeight}
-              onChangeText={setTargetWeight}
-              containerStyle={styles.half}
-            />
-          </View>
-          <View style={styles.velocity}>
-            {velocity < 0 ? (
-              <TrendingDown size={18} color={colors.rose} />
-            ) : velocity > 0 ? (
-              <TrendingUp size={18} color={colors.primaryLight} />
-            ) : (
-              <Activity size={18} color={colors.cyan} />
-            )}
-            <Text style={styles.velocityText}>
-              Target pace <Text style={styles.velocityStrong}>{velocity > 0 ? `+${velocity}` : velocity} kg/week</Text>
-              {mode === 'CUT' && velocity < -1 ? '  ⚠️ Fast — risks muscle loss' : ''}
-              {mode === 'BULK' && velocity > 0.55 ? '  ⚠️ High surplus — risks fat gain' : ''}
-            </Text>
-          </View>
-        </>
-      )}
+          ) : null}
+          <Button
+            title={step === 2 ? 'Preview my plan' : 'Continue'}
+            size="lg"
+            onPress={goNext}
+            disabled={!canAdvance}
+            style={styles.flex}
+          />
+        </View>
+      </View>
+    );
 
-      <Text style={styles.note}>
-        Switching plans archives your previous journey. Your workouts, weigh-ins and records stay in your history.
-      </Text>
+  return (
+    <SheetScreen title="Build your plan" subtitle={`Step ${step + 1} of ${STEP_COUNT}`} onClose={() => router.back()} footer={footer}>
+      <ProgressBar percentage={((step + 1) / STEP_COUNT) * 100} style={styles.progress} />
+
+      {step === 0 ? <PathChoiceStep value={path} onChange={setPath} /> : null}
+
+      {step === 1 && path ? (
+        <ModeStep
+          path={path}
+          value={mode}
+          onChange={onChangeMode}
+          blueprints={blueprintsQuery.data?.blueprints}
+          isLoading={blueprintsQuery.isLoading}
+          isError={blueprintsQuery.isError}
+          onRetry={() => blueprintsQuery.refetch()}
+        />
+      ) : null}
+
+      {step === 2 ? (
+        <DetailsStep mode={mode} details={details} onChange={patchDetails} errorMessage={detailsError} />
+      ) : null}
+
+      {step === 3 ? (
+        <RoadmapPreview
+          roadmap={previewMutation.data}
+          isLoading={previewMutation.isPending}
+          isError={previewMutation.isError}
+          errorMessage={previewMutation.error ? extractErrorMessage(previewMutation.error) : undefined}
+          onRetry={() => previewMutation.mutate(buildPreviewPayload())}
+        />
+      ) : null}
+
+      {step === 0 && hasActivePlan ? (
+        <Text style={styles.note}>
+          Switching plans archives your previous journey. Your workouts, weigh-ins and records stay in your history.
+        </Text>
+      ) : null}
     </SheetScreen>
   );
 }
 
 const useStyles = makeStyles(({ colors }) => ({
-  bpCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+  progress: {
+    marginBottom: spacing.lg,
   },
-  bpCardSelected: {
-    borderColor: colors.primaryLight,
-    backgroundColor: colors.primarySurface,
-  },
-  bpHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  bpMode: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.full,
-  },
-  bpModeText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  bpDuration: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-  },
-  bpName: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.textPrimary,
-    marginTop: spacing.sm,
-  },
-  bpDesc: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  bpPacing: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginTop: spacing.sm,
-  },
-  spaced: {
-    marginTop: spacing.sm,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  half: {
+  flex: {
     flex: 1,
   },
-  velocity: {
+  footerCol: {
+    gap: spacing.xs,
+  },
+  footerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
   },
-  velocityText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.textSecondary,
+  backBtn: {
+    paddingHorizontal: spacing.md,
   },
-  velocityStrong: {
-    fontWeight: '800',
-    color: colors.textPrimary,
+  editBtn: {
+    paddingHorizontal: spacing.lg,
+  },
+  summaryText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 2,
   },
   note: {
     fontSize: 12,

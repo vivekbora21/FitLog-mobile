@@ -65,6 +65,8 @@ export interface Exercise {
   equipment_name: string;
   instructions: string;
   video_url?: string | null;
+  /** Metabolic Equivalent of Task, used to estimate calories burned from duration. */
+  met_value?: number | null;
   is_global: boolean;
   /** The member's own movement (editable by them only). */
   is_custom?: boolean;
@@ -75,6 +77,8 @@ export interface RoutineExercise {
   exercise: string;
   exercise_name: string;
   primary_muscle: string;
+  /** Metabolic Equivalent of Task of `exercise`, used to estimate calories burned from duration. */
+  met_value?: number | null;
   order: number;
   target_sets: number;
   target_reps: string;
@@ -95,6 +99,7 @@ export interface RoutineExercise {
     exercise: string;
     exercise_name: string;
     primary_muscle: string | null;
+    met_value?: number | null;
   } | null;
 }
 
@@ -167,6 +172,8 @@ export interface WorkoutSession {
   notes: string;
   exercises: WorkoutExercise[];
   total_volume_kg: number;
+  /** Sum of each completed set's estimated calories; null if none were recorded. */
+  total_calories?: number | null;
   created_at: string;
 }
 
@@ -678,6 +685,130 @@ export interface JourneyPacingData {
     fatigue_debt_detected?: boolean;
   } | null;
   trajectory_curve: TrajectoryPoint[];
+}
+
+// --- Guided plan builder (blueprints, preview & create) ---
+
+export type PlanDifficulty = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+
+export interface BlueprintWorkoutExercise {
+  exercise_name: string;
+  sets: number;
+  reps: string;
+  rpe: number | null;
+  rest_seconds: number;
+  progression_rule: string;
+}
+
+export interface BlueprintMealSlot {
+  sample_foods: string[];
+  protein_g: number;
+  kcal: number;
+  fat_g: number;
+  swap_options: string[];
+}
+
+export interface PlanPhase {
+  name: string;
+  start_day: number;
+  end_day: number;
+}
+
+export interface Blueprint {
+  id: string;
+  slug: string;
+  name: string;
+  mode: JourneyMode;
+  description: string;
+  difficulty: PlanDifficulty;
+  default_duration_days: number;
+  default_days_per_week: number;
+  /** Signed kg/week pacing, e.g. -0.5 for a cut. */
+  pacing_kg_per_week: number;
+  phases: PlanPhase[];
+  /** Keyed "day_1".."day_7". */
+  workout_templates: Record<string, BlueprintWorkoutExercise[]>;
+  /** Keyed breakfast/lunch/snack/dinner. */
+  meal_templates: Record<string, BlueprintMealSlot>;
+  is_active: boolean;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanPreviewPayload {
+  blueprint_slug?: string;
+  mode?: JourneyMode;
+  duration_days: number;
+  days_per_week: number;
+  weekdays?: number[];
+  current_weight_kg: number;
+  goal_weight_kg?: number;
+  height_cm: number;
+  age: number;
+  sex: 'MALE' | 'FEMALE';
+}
+
+export interface CreatePlanPayload extends PlanPreviewPayload {
+  name?: string;
+}
+
+export type FeasibilityStatus = 'safe' | 'aggressive' | 'unrealistic';
+
+export interface PlanMacroTargets {
+  daily_calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
+export interface PlanDayRoadmap {
+  day_number: number;
+  phase: string;
+  is_rest: boolean;
+  workout: BlueprintWorkoutExercise[] | null;
+  targets: PlanMacroTargets;
+  expected_weight_kg: number;
+}
+
+export interface PlanRoadmap {
+  summary: {
+    duration_days: number;
+    workouts_per_week: number;
+    start_weight_kg: number;
+    goal_weight_kg: number | null;
+    daily_calories: number;
+    weekly_rate_kg: number;
+  };
+  feasibility: {
+    status: FeasibilityStatus;
+    message: string;
+  };
+  phases: PlanPhase[];
+  days: PlanDayRoadmap[];
+  meal_template: Record<string, BlueprintMealSlot>;
+  targets: {
+    training_day: PlanMacroTargets;
+    rest_day: PlanMacroTargets;
+  };
+  warnings: string[];
+}
+
+export interface CreatePlanResponse {
+  message: string;
+  program: {
+    id: string;
+    name: string;
+    mode: JourneyMode;
+    mode_label: string;
+    start_date: string;
+    duration_days: number;
+    current_day: number;
+    start_weight_kg: number;
+    target_weight_kg: number | null;
+    target_weekly_rate_kg: number;
+  };
+  roadmap: PlanRoadmap;
 }
 
 export interface DailyLog {

@@ -30,6 +30,11 @@ import type {
   JourneyMode,
   CardioEntry,
   CardioEntryPayload,
+  Blueprint,
+  PlanPreviewPayload,
+  PlanRoadmap,
+  CreatePlanPayload,
+  CreatePlanResponse,
 } from '../types';
 
 export type MealType = MealEntry['meal_type'];
@@ -524,6 +529,19 @@ class ApiClient {
     target_weight_kg?: number;
   }): Promise<unknown> {
     return this.post('/workouts/sessions/start-journey/', payload);
+  }
+
+  // Guided plan builder
+  async getBlueprints(): Promise<{ blueprints: Blueprint[] }> {
+    return this.get<{ blueprints: Blueprint[] }>('/plans/blueprints/');
+  }
+
+  async previewPlan(payload: PlanPreviewPayload): Promise<PlanRoadmap> {
+    return this.post<PlanRoadmap>('/plans/preview/', payload);
+  }
+
+  async createPlan(payload: CreatePlanPayload): Promise<CreatePlanResponse> {
+    return this.post<CreatePlanResponse>('/plans/', payload);
   }
 
   async getWorkoutSessions(): Promise<WorkoutSession[]> {

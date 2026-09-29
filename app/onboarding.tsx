@@ -1,109 +1,32 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, Alert, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
-import {
-  ArrowRight,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  Dumbbell,
-  Flame,
-  Scale,
-  Sparkles,
-  Target,
-  Zap,
-} from 'lucide-react-native';
+import { ArrowRight, Check, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
-import { Badge, Button, ChipGroup, Input, PressableScale, ProgressBar, SheetScreen } from '../src/components/ui';
+import { Button, ChipGroup, Input, PressableScale, ProgressBar, SheetScreen } from '../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../src/theme';
-import type { JourneyMode, UserProfile } from '../src/types';
+import type { Blueprint, JourneyMode, UserProfile } from '../src/types';
 import { calculateAge, formatDobDisplay, isValidDateKey, parseNumberInput, toDateKey } from '../src/lib/format';
 import { useAuth } from '../src/providers/auth';
 import { invalidateTrackingData } from '../src/lib/queries';
 import { haptics } from '../src/lib/haptics';
 import { setFlag } from '../src/lib/secureStore';
 import { onboardingSkipKey } from '../src/lib/onboarding';
+import {
+  DetailsStep,
+  ModeStep,
+  RoadmapPreview,
+  defaultWizardDetails,
+  validateDetails,
+  type WizardDetails,
+  type WizardPath,
+} from '../src/components/plan-wizard';
 
 type ActivityLevel = NonNullable<UserProfile['activity_level']>;
 type Sex = 'MALE' | 'FEMALE';
-
-interface Blueprint {
-  id: string;
-  name: string;
-  mode: JourneyMode;
-  modeLabel: string;
-  /** Palette key, resolved against the active theme when rendered. */
-  color: 'rose' | 'violet' | 'cyan' | 'amber';
-  tone: 'rose' | 'violet' | 'cyan' | 'amber';
-  Icon: typeof Flame;
-  durationDays: number;
-  description: string;
-  pacing: string;
-  targetDeltaKg: number;
-  matchingGoal: string;
-}
-
-const BLUEPRINTS: Blueprint[] = [
-  {
-    id: 'CUT_60',
-    name: '60-Day Recomp & Shred',
-    mode: 'CUT',
-    modeLabel: 'Cut',
-    color: 'rose',
-    tone: 'rose',
-    Icon: Flame,
-    durationDays: 60,
-    description: 'Strip body fat and reveal definition while locking in compound anchor strength.',
-    pacing: '-0.5 kg / week',
-    targetDeltaKg: -4.3,
-    matchingGoal: 'FAT_LOSS',
-  },
-  {
-    id: 'BULK_90',
-    name: '90-Day Mass Architecture',
-    mode: 'BULK',
-    modeLabel: 'Bulk',
-    color: 'violet',
-    tone: 'violet',
-    Icon: Dumbbell,
-    durationDays: 90,
-    description: 'Clean surplus pacing to maximise hypertrophy without excess fat gain.',
-    pacing: '+0.3 kg / week',
-    targetDeltaKg: 3.8,
-    matchingGoal: 'HYPERTROPHY',
-  },
-  {
-    id: 'FOCUS_30',
-    name: '30-Day Strength Peak',
-    mode: 'FOCUS',
-    modeLabel: 'Focus',
-    color: 'cyan',
-    tone: 'cyan',
-    Icon: Target,
-    durationDays: 30,
-    description: 'Heavy compound progression (RPE 8.5–9.5) to break plateaus and set PRs.',
-    pacing: 'Weight neutral',
-    targetDeltaKg: 0,
-    matchingGoal: 'STRENGTH',
-  },
-  {
-    id: 'HABIT_21',
-    name: '21-Day Habit Lock-in',
-    mode: 'HABIT',
-    modeLabel: 'Habit',
-    color: 'amber',
-    tone: 'amber',
-    Icon: Zap,
-    durationDays: 21,
-    description: '3 full-body sessions a week focused on consistency and routine momentum.',
-    pacing: 'Consistency first',
-    targetDeltaKg: 0,
-    matchingGoal: 'GENERAL_FITNESS',
-  },
-];
+type PlanSubStep = 'select' | 'details' | 'preview';
 
 const SEX_OPTIONS: { value: Sex; label: string }[] = [
   { value: 'MALE', label: 'Male' },
@@ -128,10 +51,6 @@ const GOAL_OPTIONS = [
 
 const WORKOUT_OPTIONS = [2, 3, 4, 5, 6].map((n) => ({ value: n, label: `${n}×` }));
 
-const round1 = (n: number) => Number(n.toFixed(1));
-
-
-
 export default function OnboardingScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -155,8 +74,14 @@ export default function OnboardingScreen() {
   const [activity, setActivity] = useState<ActivityLevel>(profile?.activity_level ?? 'MODERATE');
   const [workouts, setWorkouts] = useState(4);
 
-  // Step 2: Choose Plan
-  const [selectedPlanId, setSelectedPlanId] = useState<string>('CUT_60');
+  // Step 2: Choose Plan (a small self-contained wizard: pick mode -> details -> preview)
+  const [planSubStep, setPlanSubStep] = useState<PlanSubStep>('select');
+  const [planPath, setPlanPath] = useState<WizardPath>('blueprint');
+  const [mode, setMode] = useState<JourneyMode | null>(null);
+  const [blueprintSlug, setBlueprintSlug] = useState<string | null>(null);
+  const [skipPlan, setSkipPlan] = useState(false);
+  const [planDetails, setPlanDetails] = useState<WizardDetails>(() => defaultWizardDetails());
+  const [planDetailsError, setPlanDetailsError] = useState<string | null>(null);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -165,13 +90,46 @@ export default function OnboardingScreen() {
   const heightVal = parseNumberInput(height);
   const weightVal = parseNumberInput(weight);
 
-  // Recommended plan based on user goal
-  const recommendedPlanId = useMemo(() => {
-    if (goal === 'FAT_LOSS') return 'CUT_60';
-    if (goal === 'HYPERTROPHY') return 'BULK_90';
-    if (goal === 'STRENGTH') return 'FOCUS_30';
-    return 'HABIT_21';
+  // Recommended mode based on the user's goal from step 1.
+  const recommendedMode: JourneyMode = useMemo(() => {
+    if (goal === 'FAT_LOSS') return 'CUT';
+    if (goal === 'HYPERTROPHY') return 'BULK';
+    if (goal === 'STRENGTH') return 'FOCUS';
+    return 'HABIT';
   }, [goal]);
+
+  const blueprintsQuery = useQuery({
+    queryKey: ['blueprints'],
+    queryFn: () => api.getBlueprints(),
+    enabled: step === 2 && planPath === 'blueprint',
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: () =>
+      api.previewPlan({
+        blueprint_slug: planPath === 'blueprint' ? blueprintSlug ?? undefined : undefined,
+        mode: planPath === 'custom' ? mode ?? undefined : undefined,
+        duration_days: Math.round(parseNumberInput(planDetails.duration) ?? 0),
+        days_per_week: planDetails.daysPerWeek,
+        weekdays: planDetails.weekdays,
+        current_weight_kg: weightVal ?? 0,
+        goal_weight_kg: parseNumberInput(planDetails.goalWeight) ?? undefined,
+        height_cm: heightVal ?? 0,
+        age: dobAge ?? 0,
+        sex: sex ?? 'MALE',
+      }),
+  });
+
+  const patchPlanDetails = (patch: Partial<WizardDetails>) => setPlanDetails((prev) => ({ ...prev, ...patch }));
+
+  const onChangeMode = (m: JourneyMode, bp: Blueprint | null) => {
+    setMode(m);
+    setBlueprintSlug(bp?.slug ?? null);
+    setSkipPlan(false);
+    if (bp) {
+      patchPlanDetails({ duration: String(bp.default_duration_days), daysPerWeek: bp.default_days_per_week });
+    }
+  };
 
   const validateStep0 = () => {
     const next: Record<string, string> = {};
@@ -225,19 +183,20 @@ export default function OnboardingScreen() {
       await api.updateMacroTargets({ weekly_workouts: workouts });
       await api.applyRecommendedTargets();
 
-      // 4. Start Journey Plan (if chosen)
-      if (selectedPlanId && selectedPlanId !== 'LATER') {
-        const bp = BLUEPRINTS.find((b) => b.id === selectedPlanId);
-        if (bp) {
-          await api.startJourney({
-            blueprint: bp.id,
-            name: bp.name,
-            mode: bp.mode,
-            duration_days: bp.durationDays,
-            start_weight_kg: weightVal || undefined,
-            target_weight_kg: weightVal ? round1(weightVal + bp.targetDeltaKg) : undefined,
-          });
-        }
+      // 4. Create the guided plan (if the user didn't choose to skip it)
+      if (!skipPlan && mode) {
+        await api.createPlan({
+          blueprint_slug: planPath === 'blueprint' ? blueprintSlug ?? undefined : undefined,
+          mode: planPath === 'custom' ? mode : undefined,
+          duration_days: Math.round(parseNumberInput(planDetails.duration) ?? 0),
+          days_per_week: planDetails.daysPerWeek,
+          weekdays: planDetails.weekdays,
+          current_weight_kg: weightVal!,
+          goal_weight_kg: parseNumberInput(planDetails.goalWeight) ?? undefined,
+          height_cm: heightVal!,
+          age: dobAge!,
+          sex: sex!,
+        });
       }
 
       // 5. Mark onboarding as completed/skipped
@@ -273,20 +232,65 @@ export default function OnboardingScreen() {
       } else {
         haptics.error();
       }
-    } else if (step === 1) {
-      haptics.selection();
-      // Auto-preselect the recommended plan if user hasn't explicitly changed it
-      setSelectedPlanId(recommendedPlanId);
-      setStep(2);
-    } else {
-      saveMutation.mutate();
+      return;
     }
+    if (step === 1) {
+      haptics.selection();
+      // Reset the plan sub-wizard and preselect the recommended mode from the goal just picked.
+      setMode(recommendedMode);
+      setBlueprintSlug(null);
+      setPlanPath('blueprint');
+      setPlanSubStep('select');
+      setSkipPlan(false);
+      setStep(2);
+      return;
+    }
+    // step === 2
+    if (skipPlan) {
+      saveMutation.mutate();
+      return;
+    }
+    if (planSubStep === 'select') {
+      if (!mode || (planPath === 'blueprint' && !blueprintSlug)) {
+        haptics.error();
+        return;
+      }
+      haptics.selection();
+      setPlanSubStep('details');
+      return;
+    }
+    if (planSubStep === 'details') {
+      const err = validateDetails(planDetails, mode);
+      if (err) {
+        setPlanDetailsError(err);
+        haptics.error();
+        return;
+      }
+      setPlanDetailsError(null);
+      haptics.selection();
+      previewMutation.mutate();
+      setPlanSubStep('preview');
+      return;
+    }
+    // planSubStep === 'preview'
+    saveMutation.mutate();
   };
 
   const onBack = () => {
     haptics.selection();
-    if (step === 2) setStep(1);
-    else if (step === 1) setStep(0);
+    if (step === 2) {
+      if (planSubStep === 'preview') {
+        setPlanSubStep('details');
+        return;
+      }
+      if (planSubStep === 'details') {
+        setPlanSubStep('select');
+        return;
+      }
+      setStep(1);
+      return;
+    }
+    if (step === 1) setStep(0);
   };
 
   const userDisplayName = firstName.trim() || user?.first_name?.trim();
@@ -296,6 +300,15 @@ export default function OnboardingScreen() {
     'Step 2 of 3: Fitness Goals',
     'Step 3 of 3: Choose Plan',
   ];
+
+  const nextTitle = (() => {
+    if (step === 0) return 'Continue';
+    if (step === 1) return 'Next: Choose Plan';
+    if (skipPlan) return 'Finish Setup';
+    if (planSubStep === 'select') return 'Next: Plan Details';
+    if (planSubStep === 'details') return 'Preview My Plan';
+    return 'Start Plan & Finish';
+  })();
 
   const skipHeaderButton = (
     <TouchableOpacity
@@ -331,19 +344,21 @@ export default function OnboardingScreen() {
               />
             ) : null}
             <Button
-              title={
-                step === 0
-                  ? 'Continue'
-                  : step === 1
-                  ? 'Next: Choose Plan'
-                  : selectedPlanId === 'LATER'
-                  ? 'Finish Setup'
-                  : 'Start Plan & Finish'
-              }
+              title={nextTitle}
               size="lg"
               loading={saveMutation.isPending}
+              disabled={
+                step === 2 &&
+                planSubStep === 'preview' &&
+                !skipPlan &&
+                (previewMutation.isPending || !previewMutation.data)
+              }
               onPress={onNext}
-              icon={step < 2 ? <ArrowRight size={18} color="#FFFFFF" /> : <Check size={18} color="#FFFFFF" />}
+              icon={step < 2 || (step === 2 && !skipPlan && planSubStep !== 'preview') ? (
+                <ArrowRight size={18} color="#FFFFFF" />
+              ) : (
+                <Check size={18} color="#FFFFFF" />
+              )}
               iconPosition="right"
               style={styles.flex}
             />
@@ -466,107 +481,85 @@ export default function OnboardingScreen() {
         </Animated.View>
       ) : null}
 
-      {/* STEP 2: CHOOSE PLAN */}
+      {/* STEP 2: CHOOSE PLAN (mode -> details -> preview) */}
       {step === 2 ? (
         <Animated.View entering={FadeInRight.duration(350)}>
-          <Text style={styles.heading}>Choose your starting plan</Text>
-          <Text style={styles.body}>
-            Select the structured blueprint you will be working towards. You can change or adjust this plan anytime in your workouts tab.
-          </Text>
+          {planSubStep === 'select' ? (
+            <>
+              <Text style={styles.heading}>Choose your starting plan</Text>
+              <Text style={styles.body}>
+                We recommend a mode based on your goal. You can pick a different one, or build a fully custom plan.
+              </Text>
 
-          {BLUEPRINTS.map((bp) => {
-            const isSelected = selectedPlanId === bp.id;
-            const isRecommended = bp.id === recommendedPlanId;
-            const projectedWeight =
-              weightVal && bp.targetDeltaKg !== 0 ? round1(weightVal + bp.targetDeltaKg) : null;
+              <View style={styles.pathToggleRow}>
+                <PressableScale
+                  haptic="selection"
+                  onPress={() => setPlanPath('blueprint')}
+                  style={[styles.pathToggle, planPath === 'blueprint' && styles.pathToggleActive]}
+                >
+                  <Text style={[styles.pathToggleText, planPath === 'blueprint' && styles.pathToggleTextActive]}>
+                    Ready-made
+                  </Text>
+                </PressableScale>
+                <PressableScale
+                  haptic="selection"
+                  onPress={() => setPlanPath('custom')}
+                  style={[styles.pathToggle, planPath === 'custom' && styles.pathToggleActive]}
+                >
+                  <Text style={[styles.pathToggleText, planPath === 'custom' && styles.pathToggleTextActive]}>
+                    Build my own
+                  </Text>
+                </PressableScale>
+              </View>
 
-            return (
-              <PressableScale
-                key={bp.id}
-                haptic="selection"
-                scaleTo={0.98}
-                onPress={() => setSelectedPlanId(bp.id)}
-                style={[
-                  styles.bpCard,
-                  isSelected && styles.bpCardSelected,
-                  isRecommended && !isSelected && styles.bpCardRecommended,
-                ]}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: isSelected }}
-                accessibilityLabel={bp.name}
+              <ModeStep
+                path={planPath}
+                value={skipPlan ? null : mode}
+                onChange={onChangeMode}
+                blueprints={blueprintsQuery.data?.blueprints}
+                isLoading={blueprintsQuery.isLoading}
+                isError={blueprintsQuery.isError}
+                onRetry={() => blueprintsQuery.refetch()}
+                recommendedMode={recommendedMode}
               >
-                {/* Header row with badges */}
-                <View style={styles.bpTopRow}>
-                  <View style={styles.bpBadgeRow}>
-                    <View style={[styles.bpModeBadge, { backgroundColor: `${colors[bp.color]}22` }]}>
-                      <bp.Icon size={13} color={colors[bp.color]} />
-                      <Text style={[styles.bpModeText, { color: colors[bp.color] }]}>{bp.modeLabel}</Text>
-                    </View>
-                    <View style={styles.bpDurationBadge}>
-                      <Clock size={12} color={colors.textMuted} />
-                      <Text style={styles.bpDurationText}>{bp.durationDays} days</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.bpRightRow}>
-                    {isRecommended ? (
-                      <View style={styles.recommendedBadge}>
-                        <Sparkles size={11} color={colors.primaryLight} />
-                        <Text style={styles.recommendedText}>Recommended</Text>
-                      </View>
-                    ) : null}
-
-                    <View style={[styles.radioCircle, isSelected && styles.radioCircleActive]}>
-                      {isSelected ? <Check size={14} color="#FFFFFF" strokeWidth={3} /> : null}
-                    </View>
-                  </View>
-                </View>
-
-                {/* Plan Title & Description */}
-                <Text style={styles.bpName}>{bp.name}</Text>
-                <Text style={styles.bpDesc}>{bp.description}</Text>
-
-                {/* Footer specs: pacing and projected weight */}
-                <View style={styles.bpFooterRow}>
-                  <Text style={styles.bpPacing}>Pacing: {bp.pacing}</Text>
-                  {projectedWeight ? (
-                    <View style={styles.projectedWeightBadge}>
-                      <Scale size={12} color={colors.textSecondary} />
-                      <Text style={styles.projectedWeightText}>
-                        Target ~{projectedWeight} kg ({bp.targetDeltaKg > 0 ? `+${bp.targetDeltaKg}` : bp.targetDeltaKg} kg)
+                <PressableScale
+                  haptic="selection"
+                  scaleTo={0.98}
+                  onPress={() => setSkipPlan(true)}
+                  style={[styles.laterCard, skipPlan && styles.laterCardSelected]}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: skipPlan }}
+                  accessibilityLabel="I'll choose a plan later"
+                >
+                  <View style={styles.laterContent}>
+                    <View style={styles.laterTextCol}>
+                      <Text style={styles.laterTitle}>I&apos;ll choose a plan later</Text>
+                      <Text style={styles.laterDesc}>
+                        Finish setting up your profile now and select a workout plan later from the Workouts tab.
                       </Text>
                     </View>
-                  ) : null}
-                </View>
-              </PressableScale>
-            );
-          })}
+                    <View style={[styles.radioCircle, skipPlan && styles.radioCircleActive]}>
+                      {skipPlan ? <Check size={14} color="#FFFFFF" strokeWidth={3} /> : null}
+                    </View>
+                  </View>
+                </PressableScale>
+              </ModeStep>
+            </>
+          ) : null}
 
-          {/* Option to choose plan later */}
-          <PressableScale
-            haptic="selection"
-            scaleTo={0.98}
-            onPress={() => setSelectedPlanId('LATER')}
-            style={[
-              styles.bpCardLater,
-              selectedPlanId === 'LATER' && styles.bpCardSelected,
-            ]}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: selectedPlanId === 'LATER' }}
-            accessibilityLabel="I'll choose a plan later"
-          >
-            <View style={styles.bpLaterContent}>
-              <View style={styles.bpLaterTextCol}>
-                <Text style={styles.bpLaterTitle}>I&apos;ll choose a plan later</Text>
-                <Text style={styles.bpLaterDesc}>
-                  Finish setting up your profile now and select a workout plan later from the Workouts tab.
-                </Text>
-              </View>
-              <View style={[styles.radioCircle, selectedPlanId === 'LATER' && styles.radioCircleActive]}>
-                {selectedPlanId === 'LATER' ? <Check size={14} color="#FFFFFF" strokeWidth={3} /> : null}
-              </View>
-            </View>
-          </PressableScale>
+          {planSubStep === 'details' ? (
+            <DetailsStep mode={mode} details={planDetails} onChange={patchPlanDetails} errorMessage={planDetailsError} />
+          ) : null}
+
+          {planSubStep === 'preview' ? (
+            <RoadmapPreview
+              roadmap={previewMutation.data}
+              isLoading={previewMutation.isPending}
+              isError={previewMutation.isError}
+              errorMessage={previewMutation.error ? extractErrorMessage(previewMutation.error) : undefined}
+              onRetry={() => previewMutation.mutate()}
+            />
+          ) : null}
         </Animated.View>
       ) : null}
     </SheetScreen>
@@ -674,8 +667,35 @@ const useStyles = makeStyles(({ colors }) => ({
   backBtn: {
     paddingHorizontal: spacing.md,
   },
-  // Blueprint cards
-  bpCard: {
+  // Plan path toggle
+  pathToggleRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  pathToggle: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+  },
+  pathToggleActive: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.primaryLight,
+  },
+  pathToggleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  pathToggleTextActive: {
+    color: colors.primaryLight,
+  },
+  // "Choose later" card
+  laterCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1.5,
@@ -683,70 +703,29 @@ const useStyles = makeStyles(({ colors }) => ({
     padding: spacing.md,
     marginBottom: spacing.md,
   },
-  bpCardSelected: {
+  laterCardSelected: {
     borderColor: colors.primaryLight,
     backgroundColor: colors.primarySurface,
   },
-  bpCardRecommended: {
-    borderColor: 'rgba(16, 185, 129, 0.4)',
-  },
-  bpTopRow: {
+  laterContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  bpBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
+  laterTextCol: {
+    flex: 1,
+    marginRight: spacing.md,
   },
-  bpModeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.full,
-  },
-  bpModeText: {
-    fontSize: 11,
+  laterTitle: {
+    fontSize: 15,
     fontWeight: '700',
-    textTransform: 'uppercase',
+    color: colors.textPrimary,
   },
-  bpDurationBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-  },
-  bpDurationText: {
-    fontSize: 11,
-    fontWeight: '700',
+  laterDesc: {
+    fontSize: 12,
     color: colors.textMuted,
-  },
-  bpRightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  recommendedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.full,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  recommendedText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primaryLight,
+    marginTop: 2,
+    lineHeight: 16,
   },
   radioCircle: {
     width: 22,
@@ -761,69 +740,5 @@ const useStyles = makeStyles(({ colors }) => ({
   radioCircleActive: {
     borderColor: colors.primaryLight,
     backgroundColor: colors.primaryLight,
-  },
-  bpName: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.textPrimary,
-    marginTop: spacing.sm,
-  },
-  bpDesc: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 3,
-    lineHeight: 18,
-  },
-  bpFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.sm,
-    paddingTop: spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  bpPacing: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-  projectedWeightBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  projectedWeightText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  bpCardLater: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  bpLaterContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  bpLaterTextCol: {
-    flex: 1,
-    marginRight: spacing.md,
-  },
-  bpLaterTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  bpLaterDesc: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-    lineHeight: 16,
   },
 }));
