@@ -11,6 +11,7 @@ interface PressableScaleProps extends Omit<PressableProps, 'style'> {
   scaleTo?: number;
   haptic?: 'selection' | 'light' | 'medium' | 'none';
   children: React.ReactNode;
+  accessibilityRole?: PressableProps['accessibilityRole'];
 }
 
 const SPRING = { damping: 18, stiffness: 320, mass: 0.6 };
@@ -25,6 +26,7 @@ export function PressableScale({
   onPress,
   disabled,
   children,
+  accessibilityRole = 'button',
   ...rest
 }: PressableScaleProps) {
   const scale = useSharedValue(1);
@@ -35,7 +37,7 @@ export function PressableScale({
 
   return (
     <AnimatedPressable
-      accessibilityRole="button"
+      accessibilityRole={accessibilityRole}
       disabled={disabled}
       onPressIn={(e) => {
         scale.set(withSpring(scaleTo, SPRING));

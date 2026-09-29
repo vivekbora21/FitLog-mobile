@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, type StyleProp, Text, type TextStyle, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Animated, { useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { api, extractErrorMessage, type MealType } from '../../src/api/client';
 import { Button, ChipGroup, Input, SheetScreen, Stepper, useToast } from '../../src/components/ui';
 import { makeStyles, spacing, useTheme } from '../../src/theme';
@@ -16,6 +17,27 @@ const MEAL_TYPES: { value: MealType; label: string }[] = [
   { value: 'DINNER', label: 'Dinner' },
   { value: 'SNACK', label: 'Snack' },
 ];
+
+function BumpText({ value, style }: { value: string | number; style?: StyleProp<TextStyle> }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withSequence(
+      withTiming(1.28, { duration: 80 }),
+      withSpring(1, { damping: 10, stiffness: 220 })
+    );
+  }, [value, scale]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={animStyle}>
+      <Text style={style}>{value}</Text>
+    </Animated.View>
+  );
+}
 
 export default function EditMealScreen() {
   const { colors } = useTheme();
@@ -108,7 +130,7 @@ export default function EditMealScreen() {
           <Text style={styles.foodName}>{meal.name}</Text>
           <View style={styles.servingsRow}>
             <Text style={styles.servingsLabel}>Servings</Text>
-            <Text style={styles.servingsValue}>{activeServings ?? 1}</Text>
+            <BumpText value={activeServings ?? 1} style={styles.servingsValue} />
             <Stepper
               label="a serving"
               canDecrement={(activeServings ?? 1) > 0.5}

@@ -44,16 +44,22 @@ export function CardioSection() {
     },
   });
 
-  const confirmDeleteCardio = (id: string, label: string) => {
+  const confirmDeleteDay = (day: { date: string; entries: CardioEntry[] }) => {
     haptics.warning();
-    Alert.alert('Delete cardio session?', `Remove the entry for ${label}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => deleteCardioMutation.mutate(id),
-      },
-    ]);
+    const label = formatDayLabel(day.date);
+    const count = day.entries.length;
+    Alert.alert(
+      'Delete cardio session?',
+      count > 1 ? `Remove all ${count} entries for ${label}?` : `Remove the entry for ${label}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => day.entries.forEach((e) => deleteCardioMutation.mutate(e.id)),
+        },
+      ]
+    );
   };
 
   // Sorted Cardio: Oldest to newest for trend chart, newest to oldest for history list
@@ -76,7 +82,25 @@ export function CardioSection() {
 
   const completedCount = chronologicalCardio.filter((c) => c.completed).length;
   const avgMinutes = completedCount > 0 ? Math.round(totalMinutes / completedCount) : null;
-  const visibleHistory = showAllHistory ? recentCardio : recentCardio.slice(0, HISTORY_PAGE_SIZE);
+
+  // Merge same-day entries into a single row with combined duration.
+  const groupedHistory = useMemo(() => {
+    const map = new Map<string, CardioEntry[]>();
+    for (const c of recentCardio) {
+      const list = map.get(c.date);
+      if (list) list.push(c);
+      else map.set(c.date, [c]);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
+      .map(([date, entries]) => ({
+        date,
+        entries,
+        totalMinutes: entries.reduce((sum, e) => sum + e.duration_minutes, 0),
+      }));
+  }, [recentCardio]);
+
+  const visibleHistory = showAllHistory ? groupedHistory : groupedHistory.slice(0, HISTORY_PAGE_SIZE);
 
   if (isLoading) return null;
 
@@ -175,50 +199,52 @@ export function CardioSection() {
         ) : (
           <>
             <View style={styles.historyList}>
-              {visibleHistory.map((c) => (
-                <View key={c.id} style={styles.historyItem}>
-                  <View style={styles.historyLeft}>
-                    <View style={styles.historyDateBox}>
-                      <Calendar size={14} color={colors.primaryLight} />
-                      <Text style={styles.historyDate}>{formatDayLabel(c.date)}</Text>
-                    </View>
-                    <Text style={styles.historyIsoDate}>
-                      {c.modality} · {c.intensity}
-                    </Text>
-                  </View>
-
-                  <View style={styles.historyRight}>
-                    <View style={styles.historyWeightCol}>
-                      <Text style={styles.historyWeightVal}>
-                        {c.duration_minutes} <Text style={styles.historyWeightUnit}>min</Text>
-                      </Text>
-                      {c.heart_rate != null && (
-                        <Text style={styles.historyDiff}>{c.heart_rate} bpm</Text>
-                      )}
+              {visibleHistory.map((day) => {
+                const modalities = Array.from(new Set(day.entries.map((e) => e.modality)));
+                const summaryText =
+                  day.entries.length > 1
+                    ? `${day.entries.length} sessions · ${modalities.join(', ')}`
+                    : `${day.entries[0].modality} · ${day.entries[0].intensity}`;
+                return (
+                  <View key={day.date} style={styles.historyItem}>
+                    <View style={styles.historyLeft}>
+                      <View style={styles.historyDateBox}>
+                        <Calendar size={14} color={colors.primaryLight} />
+                        <Text style={styles.historyDate}>{formatDayLabel(day.date)}</Text>
+                      </View>
+                      <Text style={styles.historyIsoDate}>{summaryText}</Text>
                     </View>
 
-                    <PressableScale
-                      haptic="medium"
-                      onPress={() => confirmDeleteCardio(c.id, `${c.modality} on ${c.date}`)}
-                      style={styles.historyDeleteBtn}
-                      accessibilityLabel="Delete entry"
-                    >
-                      <Trash2 size={16} color={colors.textMuted} />
-                    </PressableScale>
+                    <View style={styles.historyRight}>
+                      <View style={styles.historyWeightCol}>
+                        <Text style={styles.historyWeightVal}>
+                          {day.totalMinutes} <Text style={styles.historyWeightUnit}>min</Text>
+                        </Text>
+                      </View>
+
+                      <PressableScale
+                        haptic="medium"
+                        onPress={() => confirmDeleteDay(day)}
+                        style={styles.historyDeleteBtn}
+                        accessibilityLabel="Delete entries"
+                      >
+                        <Trash2 size={16} color={colors.textMuted} />
+                      </PressableScale>
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
 
-            {recentCardio.length > HISTORY_PAGE_SIZE && (
+            {groupedHistory.length > HISTORY_PAGE_SIZE && (
               <PressableScale
                 haptic="selection"
                 onPress={() => setShowAllHistory((v) => !v)}
                 style={styles.showMoreBtn}
-                accessibilityLabel={showAllHistory ? 'Show fewer sessions' : 'Show all sessions'}
+                accessibilityLabel={showAllHistory ? 'Show fewer days' : 'Show all days'}
               >
                 <Text style={styles.showMoreText}>
-                  {showAllHistory ? 'Show less' : `Show all ${recentCardio.length} sessions`}
+                  {showAllHistory ? 'Show less' : `Show all ${groupedHistory.length} days`}
                 </Text>
                 {showAllHistory ? (
                   <ChevronUp size={16} color={colors.primaryLight} />

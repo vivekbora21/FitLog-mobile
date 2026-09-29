@@ -1,9 +1,9 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import {
   Utensils,
   Coffee,
@@ -19,9 +19,13 @@ import {
   Flame,
   Dumbbell,
   ShieldCheck,
+  TrendingUp,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { api, extractErrorMessage } from '../../src/api/client';
+import { WeeklyNutritionProgress } from '../../src/components/nutrition/WeeklyNutritionProgress';
+import { NutritionHeroCard } from '../../src/components/nutrition/NutritionHeroCard';
+import { computeWeeklyNutritionSummaries } from '../../src/lib/nutritionWeeks';
 import {
   Badge,
   Button,
@@ -30,11 +34,13 @@ import {
   EmptyState,
   ErrorState,
   PressableScale,
+  ProgressBar,
   ProgressRing,
   ScreenHeader,
   ScreenSkeleton,
   Stepper,
   useToast,
+  WaterCups,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
@@ -57,6 +63,11 @@ const MEAL_META: Record<MealEntry['meal_type'], { label: string; icon: typeof Co
 
 const enter = (i: number) => FadeInDown.delay(60 + i * 70).duration(420);
 
+const NUTRITION_TABS = [
+  { key: 'DAILY' as const, label: 'Daily Fuel', icon: Utensils },
+  { key: 'WEEKLY' as const, label: 'Weekly Nutrients', icon: TrendingUp },
+];
+
 export default function NutritionScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -76,6 +87,7 @@ export default function NutritionScreen() {
   }
 
   const [historyDaysCount, setHistoryDaysCount] = useState(5);
+  const [viewMode, setViewMode] = useState<'DAILY' | 'WEEKLY'>('DAILY');
   const scrollViewRef = useRef<ScrollView>(null);
 
   const queryKey = ['nutritionDay', date];
@@ -98,8 +110,8 @@ export default function NutritionScreen() {
     refetch: refetchHistory,
     isRefetching: isHistoryRefetching,
   } = useQuery({
-    queryKey: ['nutritionHistory', historyDaysCount],
-    queryFn: () => api.getNutritionHistory(historyDaysCount),
+    queryKey: ['nutritionHistory', Math.max(30, historyDaysCount)],
+    queryFn: () => api.getNutritionHistory(Math.max(30, historyDaysCount)),
     placeholderData: (prev) => prev,
   });
 
@@ -193,6 +205,20 @@ export default function NutritionScreen() {
   const todayKey = toDateKey(new Date());
   const historyDays = historyData?.history ?? [];
 
+  const plan = nutritionData?.plan;
+  const planMode = plan?.mode || (historyData?.program?.mode as any) || (user?.profile?.fitness_goal === 'FAT_LOSS' ? 'CUT' : (user?.profile?.fitness_goal === 'HYPERTROPHY' || user?.profile?.fitness_goal === 'STRENGTH') ? 'BULK' : 'CUT');
+  const targetType: 'MAX' | 'MIN' | 'TARGET' = plan?.target_type || (planMode === 'BULK' ? 'MIN' : planMode === 'CUT' ? 'MAX' : 'TARGET');
+  const isBulk = targetType === 'MIN' || planMode === 'BULK';
+  const isCut = targetType === 'MAX' || planMode === 'CUT';
+
+  const weeklySummaries = useMemo(() => {
+    return computeWeeklyNutritionSummaries(historyDays, targets, planMode);
+  }, [historyDays, targets, planMode]);
+  const thisWeek = weeklySummaries[0];
+  const displayedHistoryDays = useMemo(() => {
+    return historyDays.slice(0, historyDaysCount);
+  }, [historyDays, historyDaysCount]);
+
   const mealGroups = useMemo(() => {
     const meals = day?.meals || [];
     return MEAL_ORDER.map((type) => {
@@ -200,6 +226,29 @@ export default function NutritionScreen() {
       return { type, items, calories: items.reduce((sum, m) => sum + (m.calories || 0), 0) };
     }).filter((g) => g.items.length > 0);
   }, [day?.meals]);
+
+  const isToday = formatDayLabel(date) === 'Today';
+  const metMacrosRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    // Only celebrate hitting a macro target while looking at today's live totals,
+    // not while browsing history (which would replay the tick on every date switch).
+    if (!isToday) {
+      metMacrosRef.current = {};
+      return;
+    }
+    const macroValues = [
+      { label: 'Protein', consumed: day?.total_protein || 0, target: targets?.protein_g || 160 },
+      { label: 'Carbs', consumed: day?.total_carbs || 0, target: targets?.carbs_g || 240 },
+      { label: 'Fat', consumed: day?.total_fat || 0, target: targets?.fat_g || 65 },
+    ];
+    let justMet = false;
+    macroValues.forEach((m) => {
+      const met = m.target > 0 && m.consumed >= m.target;
+      if (met && !metMacrosRef.current[m.label]) justMet = true;
+      metMacrosRef.current[m.label] = met;
+    });
+    if (justMet) haptics.success();
+  }, [isToday, day?.total_protein, day?.total_carbs, day?.total_fat, targets?.protein_g, targets?.carbs_g, targets?.fat_g]);
 
   if (isLoading && !nutritionData) {
     return (
@@ -221,11 +270,6 @@ export default function NutritionScreen() {
       </SafeAreaView>
     );
   }
-  const plan = nutritionData?.plan;
-  const planMode = plan?.mode || (historyData?.program?.mode as any) || (user?.profile?.fitness_goal === 'FAT_LOSS' ? 'CUT' : (user?.profile?.fitness_goal === 'HYPERTROPHY' || user?.profile?.fitness_goal === 'STRENGTH') ? 'BULK' : 'CUT');
-  const targetType: 'MAX' | 'MIN' | 'TARGET' = plan?.target_type || (planMode === 'BULK' ? 'MIN' : planMode === 'CUT' ? 'MAX' : 'TARGET');
-  const isBulk = targetType === 'MIN' || planMode === 'BULK';
-  const isCut = targetType === 'MAX' || planMode === 'CUT';
 
   const caloriesConsumed = day?.total_calories || 0;
   const caloriesTarget = targets?.daily_calories || 2200;
@@ -305,7 +349,6 @@ export default function NutritionScreen() {
   const waterTargetCups = Math.max(1, Math.round(waterTargetMl / CUP_ML));
   const waterCups = Math.round(waterMl / CUP_ML);
   const dayLabel = formatDayLabel(date);
-  const isToday = dayLabel === 'Today';
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -337,7 +380,60 @@ export default function NutritionScreen() {
           }
         />
 
-        <DateNavigator date={date} onChange={setDate} />
+        {/* Tabs */}
+        <Animated.View entering={enter(0)} style={styles.tabsRow}>
+          {NUTRITION_TABS.map((tab) => {
+            const active = tab.key === viewMode;
+            const Icon = tab.icon;
+            return (
+              <PressableScale
+                key={tab.key}
+                onPress={() => {
+                  haptics.selection();
+                  setViewMode(tab.key);
+                }}
+                style={[styles.tabItem, active && styles.tabItemActive]}
+                accessibilityLabel={tab.key === 'DAILY' ? 'Daily Fuel log' : 'Weekly Nutrients and progress'}
+              >
+                <Icon
+                  size={16}
+                  color={active ? colors.primaryLight : colors.textMuted}
+                  strokeWidth={active ? 2.4 : 1.8}
+                />
+                <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
+                  {tab.label}
+                </Text>
+                {tab.key === 'WEEKLY' && thisWeek && thisWeek.logged_count > 0 && (
+                  <View style={[styles.tabBadge, active && styles.tabBadgeActive]}>
+                    <Text style={[styles.tabBadgeText, active && styles.tabBadgeTextActive]}>
+                      {thisWeek.logged_count}/7d
+                    </Text>
+                  </View>
+                )}
+              </PressableScale>
+            );
+          })}
+        </Animated.View>
+
+        {viewMode === 'WEEKLY' ? (
+          <WeeklyNutritionProgress
+            history={historyDays}
+            targets={targets}
+            planMode={planMode}
+            targetType={targetType}
+            selectedDate={date}
+            onSelectDate={(newDate) => {
+              setDate(newDate);
+              setViewMode('DAILY');
+              scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+            }}
+            onLogMealForDate={(targetDate) => {
+              openAddMeal(undefined, targetDate);
+            }}
+          />
+        ) : (
+          <>
+            <DateNavigator date={date} onChange={setDate} />
 
         {/* Plan Mode & Target Banner */}
         <Animated.View entering={enter(0)}>
@@ -381,40 +477,84 @@ export default function NutritionScreen() {
 
         {/* Calorie hero */}
         <Animated.View entering={enter(1)}>
-          <Card elevated style={styles.heroCard}>
-            <View style={styles.heroTop}>
-              <ProgressRing
-                percentage={ringPct}
-                size={176}
-                strokeWidth={14}
-                color={ringColor}
-                gradientTo={ringGradient}
-                delay={200}
+          <NutritionHeroCard
+            headerTitle={isCut ? 'Daily Deficit Track' : isBulk ? 'Daily Muscle Surplus' : 'Daily Energy Balance'}
+            headerSubtitle={planMode ? `${planMode} TARGET` : 'CALORIE GOAL'}
+            headerIcon={
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: radius.md,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: isBulk ? `${colors.amber}22` : isCut ? `${colors.primaryLight}22` : `${colors.cyan}22`,
+                }}
               >
-                <Text style={[styles.heroValue, ringValueColor ? { color: ringValueColor } : undefined]}>
-                  {ringValue}
-                </Text>
-                <Text style={[styles.heroLabel, ringLabelColor ? { color: ringLabelColor } : undefined]}>
-                  {ringLabel}
-                </Text>
-              </ProgressRing>
-            </View>
-
-            <View style={styles.heroStatsRow}>
-              <HeroStat label="Eaten" value={formatNumber(caloriesConsumed)} />
-              <View style={styles.heroDivider} />
-              <HeroStat
-                label={isBulk ? 'Min Target' : isCut ? 'Max Deficit' : 'Goal'}
-                value={formatNumber(caloriesTarget)}
-              />
-              <View style={styles.heroDivider} />
-              <HeroStat
-                label={isBulk ? (caloriesConsumed >= caloriesTarget ? 'Surplus' : 'Progress') : isCut ? 'Deficit' : 'Progress'}
-                value={statStatusValue}
-                accent={statAccent}
-              />
-            </View>
-          </Card>
+                {isBulk ? (
+                  <Dumbbell size={16} color={colors.amber} />
+                ) : isCut ? (
+                  <Flame size={16} color={colors.primaryLight} />
+                ) : (
+                  <ShieldCheck size={16} color={colors.cyan} />
+                )}
+              </View>
+            }
+            headerBadgeLabel={isBulk ? 'Surplus Target' : isCut ? 'Deficit Max' : 'Daily Goal'}
+            headerBadgeTone={isBulk ? 'amber' : isCut ? 'emerald' : 'cyan'}
+            percentage={ringPct}
+            gaugeColor={ringColor}
+            gaugeGradient={ringGradient}
+            centerIcon={
+              isBulk ? (
+                <Dumbbell size={14} color={colors.amber} />
+              ) : isCut ? (
+                <Flame size={14} color={colors.primaryLight} />
+              ) : (
+                <ShieldCheck size={14} color={colors.cyan} />
+              )
+            }
+            primaryValue={ringValue}
+            primaryValueColor={ringValueColor}
+            primaryLabel={ringLabel}
+            statusBadgeText={statStatusValue}
+            statusBadgeTone={
+              isCut
+                ? caloriesLeft < 0
+                  ? 'rose'
+                  : 'emerald'
+                : isBulk
+                ? caloriesConsumed >= caloriesTarget
+                  ? 'emerald'
+                  : 'amber'
+                : caloriesLeft < 0
+                ? 'rose'
+                : 'cyan'
+            }
+            stats={[
+              {
+                label: 'Eaten',
+                value: formatNumber(caloriesConsumed),
+                unit: 'kcal',
+                icon: <Utensils size={11} color={colors.primaryLight} />,
+              },
+              {
+                label: isBulk ? 'Min Target' : isCut ? 'Max Deficit' : 'Goal',
+                value: formatNumber(caloriesTarget),
+                unit: 'kcal',
+                icon: <ShieldCheck size={11} color={colors.cyan} />,
+              },
+              {
+                label: isBulk ? (caloriesConsumed >= caloriesTarget ? 'Surplus' : 'Remaining') : isCut ? 'Deficit' : 'Balance',
+                value: statStatusValue,
+                highlight: true,
+                accentColor: statAccent ? (isCut && caloriesLeft < 0 ? colors.rose : colors.primaryLight) : undefined,
+                badgeTone: isCut ? (caloriesLeft < 0 ? 'rose' : 'emerald') : isBulk ? (caloriesConsumed >= caloriesTarget ? 'emerald' : 'amber') : 'cyan',
+                badgeText: isCut ? (caloriesLeft >= 0 ? 'On Track' : 'Over Limit') : isBulk ? (caloriesConsumed >= caloriesTarget ? 'Surplus Met' : 'In Progress') : 'Tracking',
+                icon: <TrendingUp size={11} color={statAccent ? (isCut && caloriesLeft < 0 ? colors.rose : colors.primaryLight) : colors.textMuted} />,
+              },
+            ]}
+          />
         </Animated.View>
 
         {/* Macro rings */}
@@ -460,10 +600,19 @@ export default function NutritionScreen() {
                 </View>
                 <Text style={styles.waterTitle}>Hydration</Text>
               </View>
-              <Text style={styles.waterAmount}>
-                {(waterMl / 1000).toFixed(2)}
-                <Text style={styles.waterAmountTarget}> / {(waterTargetMl / 1000).toFixed(1)} L</Text>
-              </Text>
+              <View style={styles.waterAmountRow}>
+                <Text style={styles.waterAmount}>
+                  {(waterMl / 1000).toFixed(2)}
+                  <Text style={styles.waterAmountTarget}> / {(waterTargetMl / 1000).toFixed(1)} L</Text>
+                </Text>
+                <ProgressRing
+                  percentage={Math.min(100, Math.round((waterMl / Math.max(1, waterTargetMl)) * 100))}
+                  size={32}
+                  strokeWidth={3.5}
+                  color={colors.blue}
+                  gradientTo={colors.cyan}
+                />
+              </View>
             </View>
             <View style={styles.waterControls}>
               <Text style={styles.waterHint}>
@@ -478,14 +627,13 @@ export default function NutritionScreen() {
                 onIncrement={() => waterMutation.mutate(waterMl + CUP_ML)}
               />
             </View>
-            <View
-              style={styles.cupsRow}
-              accessible
-              accessibilityLabel={`${waterCups} of ${waterTargetCups} cups of water`}
-            >
-              {Array.from({ length: Math.min(waterTargetCups, 12) }).map((_, i) => (
-                <View key={i} style={[styles.cup, i < waterCups && styles.cupFilled]} />
-              ))}
+            <View style={styles.cupsRow}>
+              <WaterCups
+                cups={waterCups}
+                targetCups={waterTargetCups}
+                maxDisplay={12}
+                accentColor={colors.blue}
+              />
             </View>
           </Card>
         </Animated.View>
@@ -524,14 +672,19 @@ export default function NutritionScreen() {
                   </View>
 
                   {group.items.map((meal, mi) => (
-                    <MealRow
+                    <Animated.View
                       key={meal.id}
-                      meal={meal}
-                      bordered={mi > 0}
-                      disabled={isPlaceholderData}
-                      onOpen={() => openMeal(meal)}
-                      onDelete={() => deleteMutation.mutate(meal)}
-                    />
+                      entering={FadeInDown.delay(mi * 40).duration(280)}
+                      layout={LinearTransition.duration(220)}
+                    >
+                      <MealRow
+                        meal={meal}
+                        bordered={mi > 0}
+                        disabled={isPlaceholderData}
+                        onOpen={() => openMeal(meal)}
+                        onDelete={() => deleteMutation.mutate(meal)}
+                      />
+                    </Animated.View>
                   ))}
                 </Card>
               </Animated.View>
@@ -593,7 +746,7 @@ export default function NutritionScreen() {
           </View>
         </Animated.View>
 
-        {historyDays.map((item, i) => (
+        {displayedHistoryDays.map((item, i) => (
           <Animated.View key={item.date} entering={enter(5 + Math.min(i, 5))}>
             <NutritionHistoryCard
               item={item}
@@ -635,6 +788,8 @@ export default function NutritionScreen() {
             />
           )}
         </Animated.View>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -674,32 +829,33 @@ function MealRow({
         </View>
       )}
     >
-      <PressableScale
-        haptic="selection"
-        scaleTo={0.99}
-        onPress={onOpen}
-        disabled={disabled}
-        style={[styles.mealRow, bordered && styles.mealRowBorder]}
-        accessibilityLabel={`${meal.name}, ${formatNumber(meal.calories)} calories. Tap to edit`}
-        accessibilityActions={[{ name: 'delete', label: 'Delete' }]}
-        onAccessibilityAction={(e) => e.nativeEvent.actionName === 'delete' && onDelete()}
-      >
-        <View style={styles.mealInfo}>
-          <Text style={styles.mealName} numberOfLines={1}>
-            {meal.name}
-          </Text>
-          <View style={styles.macroChips}>
-            <MacroChip letter="P" value={meal.protein_g} color={colors.cyan} />
-            <MacroChip letter="C" value={meal.carbs_g} color={colors.amber} />
-            <MacroChip letter="F" value={meal.fat_g} color={colors.violet} />
-            {meal.servings ? (
-              <Text style={styles.servingsTag}>
-                {meal.servings} {meal.servings === 1 ? 'serving' : 'servings'}
-              </Text>
-            ) : null}
+      <View style={[styles.mealRow, bordered && styles.mealRowBorder]}>
+        <PressableScale
+          haptic="selection"
+          scaleTo={0.99}
+          onPress={onOpen}
+          disabled={disabled}
+          style={styles.mealRowClickable}
+          accessibilityLabel={`${meal.name}, ${formatNumber(meal.calories)} calories. Tap to edit`}
+        >
+          <View style={styles.mealInfo}>
+            <Text style={styles.mealName} numberOfLines={1}>
+              {meal.name}
+            </Text>
+            <View style={styles.macroChips}>
+              <MacroChip letter="P" value={meal.protein_g} color={colors.cyan} />
+              <MacroChip letter="C" value={meal.carbs_g} color={colors.amber} />
+              <MacroChip letter="F" value={meal.fat_g} color={colors.violet} />
+              {meal.servings ? (
+                <Text style={styles.servingsTag}>
+                  {meal.servings} {meal.servings === 1 ? 'serving' : 'servings'}
+                </Text>
+              ) : null}
+            </View>
           </View>
-        </View>
-        <Text style={styles.mealCalories}>{formatNumber(meal.calories)}</Text>
+          <Text style={styles.mealCalories}>{formatNumber(meal.calories)}</Text>
+        </PressableScale>
+
         <PressableScale
           haptic="light"
           onPress={onDelete}
@@ -709,21 +865,11 @@ function MealRow({
         >
           <Trash2 size={16} color={colors.textMuted} />
         </PressableScale>
-      </PressableScale>
+      </View>
     </ReanimatedSwipeable>
   );
 }
 
-function HeroStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  return (
-    <View style={styles.heroStat}>
-      <Text style={[styles.heroStatValue, accent && { color: colors.primaryLight }]}>{value}</Text>
-      <Text style={styles.heroStatLabel}>{label}</Text>
-    </View>
-  );
-}
 
 function MacroChip({ letter, value, color }: { letter: string; value: number; color: string }) {
   const styles = useStyles();
@@ -892,17 +1038,13 @@ function NutritionHistoryCard({
                 {pct}%
               </Text>
             </View>
-            <View style={styles.historyProgressBarBg}>
-              <View
-                style={[
-                  styles.historyProgressBarFill,
-                  {
-                    width: `${Math.min(100, Math.max(0, pct))}%`,
-                    backgroundColor: getBarColor(),
-                  },
-                ]}
-              />
-            </View>
+            <ProgressBar
+              percentage={pct}
+              color={getBarColor()}
+              height={5}
+              delay={80}
+              style={styles.historyProgressBar}
+            />
           </View>
         </View>
 
@@ -988,6 +1130,57 @@ function NutritionHistoryCard({
 }
 
 const useStyles = makeStyles(({ colors }) => ({
+  tabsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  tabItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  tabItemActive: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.borderGlow,
+  },
+  tabLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  tabLabelActive: {
+    color: colors.primaryLight,
+    fontWeight: '800',
+  },
+  tabBadge: {
+    backgroundColor: colors.canvas,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radius.full,
+    marginLeft: 2,
+  },
+  tabBadgeActive: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.borderGlow,
+    borderWidth: 1,
+  },
+  tabBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  tabBadgeTextActive: {
+    color: colors.primaryLight,
+    fontWeight: '800',
+  },
   planBannerCard: {
     padding: spacing.md,
     marginBottom: spacing.md,
@@ -1199,6 +1392,11 @@ const useStyles = makeStyles(({ colors }) => ({
     fontWeight: '700',
     color: colors.textPrimary,
   },
+  waterAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   waterAmount: {
     fontSize: 16,
     fontWeight: '800',
@@ -1209,9 +1407,13 @@ const useStyles = makeStyles(({ colors }) => ({
     fontWeight: '500',
     color: colors.textMuted,
   },
+  historyProgressBar: {
+    marginTop: spacing.xs,
+    width: '100%',
+  },
   cupsRow: {
     flexDirection: 'row',
-    gap: 6,
+    marginTop: spacing.xs,
   },
   cup: {
     flex: 1,
@@ -1297,6 +1499,12 @@ const useStyles = makeStyles(({ colors }) => ({
   mealRowBorder: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  mealRowClickable: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   mealInfo: {
     flex: 1,

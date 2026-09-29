@@ -28,6 +28,7 @@ import {
   PressableScale,
   ProgressBar,
   ScreenSkeleton,
+  SnapStatusButton,
 } from '../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../src/theme';
 import { getProgramDayDate, toDateKey } from '../src/lib/format';
@@ -415,80 +416,59 @@ export default function PlanScreen() {
 
                 {/* 1-tap quick status selector */}
                 <View style={styles.statusRow}>
-                  <PressableScale
-                    style={[
-                      styles.statusBtn,
-                      day?.status === 'COMPLETED' && styles.statusBtnActiveDone,
-                    ]}
+                  <SnapStatusButton
+                    label="Done"
+                    icon={
+                      <Check
+                        size={14}
+                        color={day?.status === 'COMPLETED' ? colors.primaryLight : colors.textSecondary}
+                      />
+                    }
+                    active={day?.status === 'COMPLETED'}
+                    activeColor={colors.primaryLight}
+                    activeBackground={colors.primarySurface}
                     onPress={() => statusMutation.mutate('COMPLETED')}
                     disabled={statusMutation.isPending}
-                  >
-                    <Check
-                      size={14}
-                      color={day?.status === 'COMPLETED' ? colors.primaryLight : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.statusBtnText,
-                        day?.status === 'COMPLETED' && { color: colors.primaryLight },
-                      ]}
-                    >
-                      Done
-                    </Text>
-                  </PressableScale>
+                  />
 
-                  <PressableScale
-                    style={[
-                      styles.statusBtn,
-                      day?.status === 'REST' && styles.statusBtnActiveRest,
-                    ]}
+                  <SnapStatusButton
+                    label="Rest"
+                    icon={
+                      <Moon
+                        size={14}
+                        color={day?.status === 'REST' ? colors.cyan : colors.textSecondary}
+                      />
+                    }
+                    active={day?.status === 'REST'}
+                    activeColor={colors.cyan}
+                    activeBackground={colors.cyanGlow}
                     onPress={() => statusMutation.mutate('REST')}
                     disabled={statusMutation.isPending}
-                  >
-                    <Moon
-                      size={14}
-                      color={day?.status === 'REST' ? colors.cyan : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.statusBtnText,
-                        day?.status === 'REST' && { color: colors.cyan },
-                      ]}
-                    >
-                      Rest
-                    </Text>
-                  </PressableScale>
+                  />
 
-                  <PressableScale
-                    style={[
-                      styles.statusBtn,
-                      day?.status === 'MISSED' && styles.statusBtnActiveSkip,
-                    ]}
+                  <SnapStatusButton
+                    label="Skip"
+                    icon={
+                      <FastForward
+                        size={14}
+                        color={day?.status === 'MISSED' ? colors.warning : colors.textSecondary}
+                      />
+                    }
+                    active={day?.status === 'MISSED'}
+                    activeColor={colors.warning}
+                    activeBackground={colors.amberGlow}
                     onPress={() => statusMutation.mutate('MISSED')}
                     disabled={statusMutation.isPending}
-                  >
-                    <FastForward
-                      size={14}
-                      color={day?.status === 'MISSED' ? colors.warning : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.statusBtnText,
-                        day?.status === 'MISSED' && { color: colors.warning },
-                      ]}
-                    >
-                      Skip
-                    </Text>
-                  </PressableScale>
+                  />
 
                   {day?.status && day.status !== 'UPCOMING' && (
-                    <PressableScale
-                      style={[styles.statusBtn, { flex: 0.6 }]}
+                    <SnapStatusButton
+                      icon={<RotateCcw size={13} color={colors.textMuted} />}
+                      flex={0.5}
                       onPress={() => statusMutation.mutate('UPCOMING')}
                       disabled={statusMutation.isPending}
-                    >
-                      <RotateCcw size={13} color={colors.textMuted} />
-                    </PressableScale>
+                      accessibilityLabel="Reset status"
+                    />
                   )}
                 </View>
 

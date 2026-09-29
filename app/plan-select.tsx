@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, BackHandler, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Animated, { FadeInRight } from 'react-native-reanimated';
 import { ChevronLeft, Pencil, Play } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
 import { Button, ProgressBar, SheetScreen } from '../src/components/ui';
@@ -242,32 +243,42 @@ export default function PlanSelectScreen() {
     <SheetScreen title="Build your plan" subtitle={`Step ${step + 1} of ${STEP_COUNT}`} onClose={() => router.back()} footer={footer}>
       <ProgressBar percentage={((step + 1) / STEP_COUNT) * 100} style={styles.progress} />
 
-      {step === 0 ? <PathChoiceStep value={path} onChange={setPath} /> : null}
+      {step === 0 ? (
+        <Animated.View key="step-0" entering={FadeInRight.duration(300).springify().damping(15)}>
+          <PathChoiceStep value={path} onChange={setPath} />
+        </Animated.View>
+      ) : null}
 
       {step === 1 && path ? (
-        <ModeStep
-          path={path}
-          value={mode}
-          onChange={onChangeMode}
-          blueprints={blueprintsQuery.data?.blueprints}
-          isLoading={blueprintsQuery.isLoading}
-          isError={blueprintsQuery.isError}
-          onRetry={() => blueprintsQuery.refetch()}
-        />
+        <Animated.View key="step-1" entering={FadeInRight.duration(300).springify().damping(15)}>
+          <ModeStep
+            path={path}
+            value={mode}
+            onChange={onChangeMode}
+            blueprints={blueprintsQuery.data?.blueprints}
+            isLoading={blueprintsQuery.isLoading}
+            isError={blueprintsQuery.isError}
+            onRetry={() => blueprintsQuery.refetch()}
+          />
+        </Animated.View>
       ) : null}
 
       {step === 2 ? (
-        <DetailsStep mode={mode} details={details} onChange={patchDetails} errorMessage={detailsError} />
+        <Animated.View key="step-2" entering={FadeInRight.duration(300).springify().damping(15)}>
+          <DetailsStep mode={mode} details={details} onChange={patchDetails} errorMessage={detailsError} />
+        </Animated.View>
       ) : null}
 
       {step === 3 ? (
-        <RoadmapPreview
-          roadmap={previewMutation.data}
-          isLoading={previewMutation.isPending}
-          isError={previewMutation.isError}
-          errorMessage={previewMutation.error ? extractErrorMessage(previewMutation.error) : undefined}
-          onRetry={() => previewMutation.mutate(buildPreviewPayload())}
-        />
+        <Animated.View key="step-3" entering={FadeInRight.duration(300).springify().damping(15)}>
+          <RoadmapPreview
+            roadmap={previewMutation.data}
+            isLoading={previewMutation.isPending}
+            isError={previewMutation.isError}
+            errorMessage={previewMutation.error ? extractErrorMessage(previewMutation.error) : undefined}
+            onRetry={() => previewMutation.mutate(buildPreviewPayload())}
+          />
+        </Animated.View>
       ) : null}
 
       {step === 0 && hasActivePlan ? (

@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text } from 'react-native';
 import { Check, ChevronLeft, ChevronRight, Moon, SkipForward } from 'lucide-react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { SlideInLeft, SlideInRight, runOnJS } from 'react-native-reanimated';
 import { PressableScale } from './PressableScale';
 import { Card } from './Card';
 import { radius, spacing, makeStyles, useTheme } from '../../theme';
@@ -37,6 +39,8 @@ export function WeekCalendar({
 
   // Offset in weeks from current week (0 = current week, -1 = last week, etc.)
   const [weekOffset, setWeekOffset] = useState(0);
+  // Direction of the most recent week change, used to slide the new week in from the matching side.
+  const [swipeDirection, setSwipeDirection] = useState<1 | -1>(1);
 
   // Compute 7 days for the active week window
   const weekDays = useMemo(() => {
@@ -72,13 +76,30 @@ export function WeekCalendar({
 
   const handlePrevWeek = () => {
     haptics.selection();
+    setSwipeDirection(-1);
     setWeekOffset((w) => w - 1);
   };
 
   const handleNextWeek = () => {
     haptics.selection();
+    setSwipeDirection(1);
     setWeekOffset((w) => w + 1);
   };
+
+  const swipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-20, 20])
+        .failOffsetY([-12, 12])
+        .onEnd((e) => {
+          if (e.translationX <= -40) {
+            runOnJS(handleNextWeek)();
+          } else if (e.translationX >= 40) {
+            runOnJS(handlePrevWeek)();
+          }
+        }),
+    []
+  );
 
   const handleDayPress = (key: string) => {
     haptics.selection();
@@ -134,7 +155,12 @@ export function WeekCalendar({
       </View>
 
       {/* Week Day Columns */}
-      <View style={styles.weekRow}>
+      <GestureDetector gesture={swipeGesture}>
+        <Animated.View
+          key={weekOffset}
+          entering={(swipeDirection === 1 ? SlideInRight : SlideInLeft).duration(220)}
+          style={styles.weekRow}
+        >
         {weekDays.map((d) => {
           const key = toDateKey(d);
           const isToday = key === todayKey;
@@ -145,6 +171,10 @@ export function WeekCalendar({
           // Fallback to heatmap if calendarDays didn't mark it
           if (status === 'UPCOMING' && (heatmap[key] || 0) > 0) {
             status = 'COMPLETED';
+          }
+          // Default Sunday to a rest day when it has no completed/skipped/rest status yet
+          if (status === 'UPCOMING' && d.getDay() === 0) {
+            status = 'REST';
           }
 
           const isCompleted = status === 'COMPLETED';
@@ -210,7 +240,8 @@ export function WeekCalendar({
             </PressableScale>
           );
         })}
-      </View>
+        </Animated.View>
+      </GestureDetector>
 
       {/* Legend */}
       <View style={styles.legendRow}>

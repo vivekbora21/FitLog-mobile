@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import {
   LogOut,
@@ -25,7 +25,7 @@ import {
   User as UserIcon,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
-import { Avatar, Badge, Button, PressableScale, ScreenHeader } from '../../src/components/ui';
+import { Avatar, Badge, Button, PressableScale, ProgressRing, ScreenHeader } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, type ThemePreference, makeStyles, useTheme } from '../../src/theme';
 import { humanize, calculateAge, formatDobDisplay, calculateBMI, getBMICategory } from '../../src/lib/format';
@@ -127,33 +127,35 @@ export default function ProfileScreen() {
               label="Height"
               value={profile?.height_cm ? `${profile.height_cm} cm` : '--'}
             />
-            <ProfileStat
-              icon={<CalendarDays size={16} color={colors.primaryLight} />}
-              label="Age"
-              value={age != null ? `${age}y` : '--'}
-            />
-          </View>
-          <View style={[styles.statsRow, { marginTop: spacing.sm }]}>
-            <ProfileStat
-              icon={<UserIcon size={16} color={colors.violet} />}
-              label="Sex"
-              value={profile?.sex ? humanize(profile.sex) : '--'}
-            />
             {bmi != null && bmiCategory ? (
               <ProfileStat
-                icon={<Activity size={16} color={colors[bmiCategory.tone]} />}
+                icon={<Activity size={14} color={colors[bmiCategory.tone]} />}
                 label={bmiCategory.label}
                 value={`${bmi}`}
                 valueColor={colors[bmiCategory.tone]}
                 labelColor={colors[bmiCategory.tone]}
+                gaugePercentage={Math.min(100, Math.max(10, Math.round(((bmi - 15) / 20) * 100)))}
+                gaugeColor={colors[bmiCategory.tone]}
               />
             ) : (
               <ProfileStat
-                icon={<Activity size={16} color={colors.amber} />}
-                label="Activity"
-                value={humanize(profile?.activity_level) || 'Moderate'}
+                icon={<CalendarDays size={16} color={colors.primaryLight} />}
+                label="Age"
+                value={age != null ? `${age}y` : '--'}
               />
             )}
+          </View>
+          <View style={[styles.statsRow, { marginTop: spacing.sm }]}>
+            <ProfileStat
+              icon={<UserIcon size={16} color={colors.violet} />}
+              label="Gender"
+              value={profile?.sex ? humanize(profile.sex) : '--'}
+            />
+            <ProfileStat
+              icon={<Activity size={16} color={colors.amber} />}
+              label="Activity"
+              value={humanize(profile?.activity_level) || 'Moderate'}
+            />
             <ProfileStat
               icon={<CalendarDays size={16} color={colors.primaryLight} />}
               label="DOB"
@@ -171,7 +173,7 @@ export default function ProfileScreen() {
               icon={<PencilLine size={18} color={colors.primaryLight} />}
               iconTint={colors.primarySurface}
               title="Edit profile"
-              subtitle="Name, DOB, sex, weight, height, activity & goal"
+              subtitle="Name, DOB, Gender, weight, height, activity & goal"
               onPress={() => router.push('/profile-edit')}
               right={<ChevronRight size={18} color={colors.textMuted} />}
             />
@@ -238,24 +240,7 @@ export default function ProfileScreen() {
               title="Theme"
               subtitle="Light, dark, or match your device"
             />
-            <View style={styles.segment} accessibilityRole="radiogroup">
-              {THEME_OPTIONS.map(({ value, label, Icon }) => {
-                const selected = value === preference;
-                return (
-                  <PressableScale
-                    key={value}
-                    onPress={() => changeTheme(value)}
-                    style={[styles.segmentItem, selected && styles.segmentItemSelected]}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={`${label} theme`}
-                  >
-                    <Icon size={16} color={selected ? colors.primaryLight : colors.textSecondary} />
-                    <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{label}</Text>
-                  </PressableScale>
-                );
-              })}
-            </View>
+            <ThemeSegment preference={preference} onChangeTheme={changeTheme} />
           </View>
         </Animated.View>
 
@@ -307,21 +292,99 @@ function ProfileStat({
   value,
   valueColor,
   labelColor,
+  gaugePercentage,
+  gaugeColor,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   valueColor?: string;
   labelColor?: string;
+  gaugePercentage?: number;
+  gaugeColor?: string;
 }) {
   const styles = useStyles();
   return (
     <View style={styles.stat} accessible accessibilityLabel={`${label}: ${value}`}>
-      {icon}
+      {gaugePercentage !== undefined ? (
+        <ProgressRing
+          percentage={gaugePercentage}
+          size={36}
+          strokeWidth={3}
+          color={gaugeColor ?? valueColor}
+          delay={250}
+        >
+          {icon}
+        </ProgressRing>
+      ) : (
+        icon
+      )}
       <Text style={[styles.statValue, valueColor ? { color: valueColor } : null]} numberOfLines={1} adjustsFontSizeToFit>
         {value}
       </Text>
       <Text style={[styles.statLabel, labelColor ? { color: labelColor } : null]}>{label}</Text>
+    </View>
+  );
+}
+
+function ThemeSegment({
+  preference,
+  onChangeTheme,
+}: {
+  preference: ThemePreference;
+  onChangeTheme: (theme: ThemePreference) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const selectedIndex = THEME_OPTIONS.findIndex((opt) => opt.value === preference);
+  const activeIndex = selectedIndex >= 0 ? selectedIndex : 0;
+
+  const itemWidth =
+    containerWidth > 0 ? (containerWidth - (THEME_OPTIONS.length - 1) * spacing.sm) / THEME_OPTIONS.length : 0;
+  const translateX = useSharedValue(0);
+
+  React.useEffect(() => {
+    if (itemWidth > 0) {
+      const target = activeIndex * (itemWidth + spacing.sm);
+      translateX.set(withSpring(target, { damping: 18, stiffness: 220 }));
+    }
+  }, [activeIndex, itemWidth, translateX]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+    width: itemWidth > 0 ? itemWidth : '33%',
+  }));
+
+  return (
+    <View
+      style={styles.segment}
+      onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width - spacing.md * 2)}
+      accessibilityRole="radiogroup"
+    >
+      {itemWidth > 0 && (
+        <Animated.View
+          style={[styles.segmentIndicator, indicatorStyle]}
+          pointerEvents="none"
+        />
+      )}
+      {THEME_OPTIONS.map(({ value, label, Icon }) => {
+        const selected = value === preference;
+        return (
+          <PressableScale
+            key={value}
+            onPress={() => onChangeTheme(value)}
+            style={styles.segmentItem}
+            accessibilityRole="radio"
+            accessibilityState={{ selected }}
+            accessibilityLabel={`${label} theme`}
+          >
+            <Icon size={16} color={selected ? colors.primaryLight : colors.textSecondary} />
+            <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{label}</Text>
+          </PressableScale>
+        );
+      })}
     </View>
   );
 }
@@ -502,6 +565,17 @@ const useStyles = makeStyles(({ colors }) => ({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
+    position: 'relative',
+  },
+  segmentIndicator: {
+    position: 'absolute',
+    top: 0,
+    left: spacing.md,
+    bottom: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySurface,
+    borderWidth: 1.5,
+    borderColor: colors.primaryLight,
   },
   segmentItem: {
     flex: 1,
@@ -514,10 +588,7 @@ const useStyles = makeStyles(({ colors }) => ({
     backgroundColor: colors.surfaceElevated,
     borderWidth: 1.5,
     borderColor: colors.border,
-  },
-  segmentItemSelected: {
-    backgroundColor: colors.primarySurface,
-    borderColor: colors.primaryLight,
+    zIndex: 2,
   },
   segmentText: {
     fontSize: 13,

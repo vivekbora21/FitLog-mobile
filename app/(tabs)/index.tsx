@@ -1,9 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, {
+  FadeInDown,
+  FadeInRight,
+  ZoomIn,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import {
   Flame,
   Dumbbell,
@@ -25,14 +34,15 @@ import {
   Badge,
   MetricCard,
   Avatar,
-  ProgressRing,
   ProgressBar,
+  ArcGauge,
   PressableScale,
   ScreenSkeleton,
   ErrorState,
   Stepper,
   WeekCalendar,
   DayActionModal,
+  WaterCups,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
@@ -80,7 +90,6 @@ export default function DashboardScreen() {
     await Promise.all([refetchStats(), refetchWorkout()]);
   };
 
-  const weekDays = useMemo(() => getLastSevenDays(), []);
   const todayKey = toDateKey(new Date());
 
   const waterMutation = useMutation({
@@ -93,10 +102,6 @@ export default function DashboardScreen() {
   });
 
   const [activeDayModal, setActiveDayModal] = useState<string | null>(null);
-
-  const openDay = (key: string) => {
-    setActiveDayModal(key);
-  };
 
   if (isStatsLoading && !stats) {
     return (
@@ -213,14 +218,7 @@ export default function DashboardScreen() {
               </Text>
             </View>
           </PressableScale>
-          <View
-            style={styles.streakBadge}
-            accessible
-            accessibilityLabel={`${stats?.streak_days ?? 0} day streak`}
-          >
-            <Flame size={18} color={colors.warning} fill={colors.warning} />
-            <Text style={styles.streakValue}>{stats?.streak_days ?? 0}</Text>
-          </View>
+          <StreakBadge streakDays={stats?.streak_days ?? 0} />
         </Animated.View>
 
         <ResumeWorkoutBanner />
@@ -271,37 +269,58 @@ export default function DashboardScreen() {
             style={styles.heroCard}
           >
             <View style={styles.heroRow}>
-              <ProgressRing
+              <ArcGauge
                 percentage={isBulk && calConsumed >= calTarget ? 100 : Math.min(100, Math.max(0, calPct))}
                 size={132}
-                strokeWidth={12}
+                strokeWidth={11}
+                arcAngle={220}
                 color={isBulk ? (calConsumed >= calTarget ? colors.success : colors.amber) : isCut && calDiff > 0 ? colors.warning : colors.primaryLight}
                 gradientTo={isBulk ? (calConsumed >= calTarget ? colors.cyan : colors.primaryLight) : isCut && calDiff > 0 ? colors.rose : colors.cyan}
                 delay={250}
               >
-                <Text
-                  style={[
-                    styles.ringValue,
-                    isBulk && calConsumed >= calTarget && { color: colors.success },
-                    isCut && calDiff > 0 && { color: colors.warning },
-                  ]}
-                >
-                  {isBulk
-                    ? (calConsumed >= calTarget ? (calDiff > 0 ? `+${formatNumber(calDiff)}` : 'Hit!') : formatNumber(Math.max(0, calRemaining)))
-                    : formatNumber(Math.abs(calRemaining))}
-                </Text>
-                <Text
-                  style={[
-                    styles.ringLabel,
-                    isBulk && calConsumed >= calTarget && { color: colors.success },
-                    isCut && calDiff > 0 && { color: colors.warning },
-                  ]}
-                >
-                  {isBulk
-                    ? (calConsumed >= calTarget ? 'surplus met!' : 'kcal needed (min)')
-                    : (calRemaining >= 0 ? 'kcal left (max)' : 'kcal over max')}
-                </Text>
-              </ProgressRing>
+                <View style={styles.dashboardArcCenter}>
+                  <View
+                    style={[
+                      styles.dashboardArcIconWrap,
+                      {
+                        backgroundColor: isBulk
+                          ? `${colors.amber}18`
+                          : isCut && calDiff > 0
+                          ? `${colors.rose}18`
+                          : `${colors.primaryLight}18`,
+                      },
+                    ]}
+                  >
+                    {isBulk ? (
+                      <Dumbbell size={11} color={calConsumed >= calTarget ? colors.success : colors.amber} />
+                    ) : (
+                      <Flame size={11} color={isCut && calDiff > 0 ? colors.rose : colors.primaryLight} />
+                    )}
+                  </View>
+                  <Text
+                    style={[
+                      styles.ringValue,
+                      isBulk && calConsumed >= calTarget && { color: colors.success },
+                      isCut && calDiff > 0 && { color: colors.warning },
+                    ]}
+                  >
+                    {isBulk
+                      ? (calConsumed >= calTarget ? (calDiff > 0 ? `+${formatNumber(calDiff)}` : 'Hit!') : formatNumber(Math.max(0, calRemaining)))
+                      : formatNumber(Math.abs(calRemaining))}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.ringLabel,
+                      isBulk && calConsumed >= calTarget && { color: colors.success },
+                      isCut && calDiff > 0 && { color: colors.warning },
+                    ]}
+                  >
+                    {isBulk
+                      ? (calConsumed >= calTarget ? 'surplus met!' : 'kcal needed')
+                      : (calRemaining >= 0 ? 'kcal left' : 'kcal over')}
+                  </Text>
+                </View>
+              </ArcGauge>
 
               <View style={styles.macroCol}>
                 {macros.map((m, i) => (
@@ -398,14 +417,23 @@ export default function DashboardScreen() {
             icon={<Droplet size={14} color={colors.blue} />}
             footer={
               <View style={styles.metricFooter}>
-                <Stepper
-                  label="a cup of water"
+                <WaterCups
+                  cups={waterCups}
+                  targetCups={waterTargetCups}
+                  maxDisplay={8}
+                  size="sm"
                   accentColor={colors.blue}
-                  disabled={waterMutation.isPending}
-                  canDecrement={waterMl > 0}
-                  onDecrement={() => waterMutation.mutate(Math.max(0, waterMl - 250))}
-                  onIncrement={() => waterMutation.mutate(waterMl + 250)}
                 />
+                <View style={{ marginTop: spacing.sm }}>
+                  <Stepper
+                    label="a cup of water"
+                    accentColor={colors.blue}
+                    disabled={waterMutation.isPending}
+                    canDecrement={waterMl > 0}
+                    onDecrement={() => waterMutation.mutate(Math.max(0, waterMl - 250))}
+                    onIncrement={() => waterMutation.mutate(waterMl + 250)}
+                  />
+                </View>
               </View>
             }
           />
@@ -513,7 +541,11 @@ export default function DashboardScreen() {
               decelerationRate="fast"
             >
               {prs.slice(0, 8).map((pr, idx) => (
-                <View key={`${pr.exercise}-${idx}`} style={styles.prCard}>
+                <Animated.View
+                  key={`${pr.exercise}-${idx}`}
+                  entering={FadeInRight.delay(100 + idx * 70).duration(380).springify().damping(12)}
+                  style={styles.prCard}
+                >
                   <View style={styles.prIcon}>
                     <Trophy size={16} color={colors.warning} />
                   </View>
@@ -525,7 +557,7 @@ export default function DashboardScreen() {
                     <Text style={styles.prUnit}> kg × {pr.reps}</Text>
                   </Text>
                   <Text style={styles.prSub}>e1RM {Math.round(pr.estimated_1rm)} kg</Text>
-                </View>
+                </Animated.View>
               ))}
             </ScrollView>
           </Animated.View>
@@ -541,6 +573,47 @@ export default function DashboardScreen() {
         />
       )}
     </SafeAreaView>
+  );
+}
+
+function StreakBadge({ streakDays }: { streakDays: number }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const scale = useSharedValue(0.8);
+  const prevStreak = useRef(streakDays);
+
+  useEffect(() => {
+    // Initial bounce animation on mount
+    scale.set(
+      withSequence(
+        withSpring(1.15, { damping: 8, stiffness: 280 }),
+        withSpring(1, { damping: 12, stiffness: 220 })
+      )
+    );
+  }, [scale]);
+
+  useEffect(() => {
+    if (streakDays > prevStreak.current) {
+      haptics.success();
+      scale.set(withSequence(withTiming(1.3, { duration: 140 }), withSpring(1, { damping: 10 })));
+    }
+    prevStreak.current = streakDays;
+  }, [streakDays, scale]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View
+      entering={ZoomIn.duration(420).springify().damping(12)}
+      style={[styles.streakBadge, animatedStyle]}
+      accessible
+      accessibilityLabel={`${streakDays} day streak`}
+    >
+      <Flame size={18} color={colors.warning} fill={colors.warning} />
+      <Text style={styles.streakValue}>{streakDays}</Text>
+    </Animated.View>
   );
 }
 
@@ -729,16 +802,28 @@ const useStyles = makeStyles(({ colors }) => ({
     alignItems: 'center',
     gap: spacing.lg,
   },
+  dashboardArcCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dashboardArcIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
   ringValue: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '900',
     color: colors.textPrimary,
     letterSpacing: -0.5,
   },
   ringLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.textSecondary,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },

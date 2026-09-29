@@ -311,8 +311,48 @@ export interface NutritionHistoryDay {
   mode?: JourneyMode | 'MAINTAIN';
 }
 
+export interface WeeklyNutritionDayItem {
+  date: string;
+  weekday: string;
+  day_number: number;
+  total_calories: number;
+  total_protein: number;
+  total_carbs: number;
+  total_fat: number;
+  water_consumed_ml: number;
+  has_logged: boolean;
+  is_today: boolean;
+  is_future: boolean;
+  target_calories: number;
+}
+
+export interface WeeklyNutritionSummary {
+  week_start: string;
+  week_end: string;
+  label: string;
+  logged_count: number;
+  total_days: number;
+  avg_calories: number;
+  avg_protein: number;
+  avg_carbs: number;
+  avg_fat: number;
+  avg_water_ml: number;
+  target_calories: number;
+  target_protein: number;
+  target_carbs: number;
+  target_fat: number;
+  target_water: number;
+  net_calorie_diff: number;
+  calorie_adherence_pct: number;
+  protein_adherence_pct: number;
+  adherence_rate_pct: number;
+  copilot_insight: string;
+  days: WeeklyNutritionDayItem[];
+}
+
 export interface NutritionHistoryResponse {
   history: NutritionHistoryDay[];
+  weeks?: WeeklyNutritionSummary[];
   targets: MacroTarget;
   program?: {
     start_date?: string | null;

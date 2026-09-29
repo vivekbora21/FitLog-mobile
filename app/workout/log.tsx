@@ -1,10 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Alert, ActivityIndicator, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clock, Pencil, Plus, Sparkles } from 'lucide-react-native';
 import { api, extractErrorMessage, type WorkoutSessionPayload } from '../../src/api/client';
-import { Button, Card, DateNavigator, Input, PressableScale, SheetScreen, useToast } from '../../src/components/ui';
+import { Button, Card, ConfirmModal, DateNavigator, Input, PressableScale, SheetScreen, useToast } from '../../src/components/ui';
 import { makeStyles, radius, spacing, useTheme } from '../../src/theme';
 import {
   formatRelativeDay,
@@ -80,6 +88,7 @@ export default function LogWorkoutScreen() {
   const [ready, setReady] = useState(!!editId || !hasDraft || resumeNow);
   const [prefilled, setPrefilled] = useState(resumeNow);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
+  const [closeConfirm, setCloseConfirm] = useState<'discard-edit' | 'leave-draft' | null>(null);
 
   const isToday = date === todayKey;
   const isLive = !editId && live && isToday;
@@ -365,28 +374,14 @@ export default function LogWorkoutScreen() {
       const dirty =
         initialSnapshot !== null && initialSnapshot !== JSON.stringify([date, title, notes, duration, exercises]);
       if (!dirty) return router.back();
-      Alert.alert('Discard changes?', 'Your edits to this workout will be lost.', [
-        { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: () => router.back() },
-      ]);
+      setCloseConfirm('discard-edit');
       return;
     }
     if (!draftHasContent({ exercises, title, notes })) {
       clearWorkoutDraft();
       return router.back();
     }
-    Alert.alert('Leave this workout?', 'It stays saved on this device — resume it any time from the Workouts tab.', [
-      { text: 'Keep going', style: 'cancel' },
-      {
-        text: 'Discard',
-        style: 'destructive',
-        onPress: () => {
-          clearWorkoutDraft();
-          router.back();
-        },
-      },
-      { text: 'Save for later', onPress: () => router.back() },
-    ]);
+    setCloseConfirm('leave-draft');
   };
 
   const screenTitle = editId ? 'Edit workout' : 'Workout';
@@ -402,7 +397,7 @@ export default function LogWorkoutScreen() {
           </View>
           <Text style={styles.resumeTitle}>Resume unfinished workout?</Text>
           <Text style={styles.resumeSubtitle}>
-            "{savedDraft.title || 'Workout'}" from {formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn't finished yet.
+            &ldquo;{savedDraft.title || 'Workout'}&rdquo; from {formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn&apos;t finished yet.
           </Text>
           <View style={styles.resumeBtnCol}>
             <Button
@@ -661,6 +656,7 @@ export default function LogWorkoutScreen() {
                 muscle: e.muscle,
                 restSeconds: 0,
                 isCardio: true,
+                metValue: e.metValue,
                 sets: [newCardioSet('20', e.name.toLowerCase().includes('incline') ? '10' : '0', '4.8', 'Zone 2')],
               },
             ]);
@@ -691,6 +687,51 @@ export default function LogWorkoutScreen() {
           toast({ message: 'Cardio session logged' });
         }}
       />
+
+      <ConfirmModal
+        visible={closeConfirm === 'discard-edit'}
+        title="Discard changes?"
+        message="Your edits to this workout will be lost."
+        cancelLabel="Keep editing"
+        onCancel={() => setCloseConfirm(null)}
+        actions={[
+          {
+            label: 'Discard',
+            variant: 'danger',
+            onPress: () => {
+              setCloseConfirm(null);
+              router.back();
+            },
+          },
+        ]}
+      />
+
+      <ConfirmModal
+        visible={closeConfirm === 'leave-draft'}
+        title="Leave this workout?"
+        message="It stays saved on this device — resume it any time from the Workouts tab."
+        cancelLabel="Keep going"
+        onCancel={() => setCloseConfirm(null)}
+        actions={[
+          {
+            label: 'Discard',
+            variant: 'danger',
+            onPress: () => {
+              setCloseConfirm(null);
+              clearWorkoutDraft();
+              router.back();
+            },
+          },
+          {
+            label: 'Save for later',
+            variant: 'secondary',
+            onPress: () => {
+              setCloseConfirm(null);
+              router.back();
+            },
+          },
+        ]}
+      />
     </SheetScreen>
   );
 }
@@ -699,9 +740,30 @@ export default function LogWorkoutScreen() {
 function LiveClock({ startedAt }: { startedAt: number }) {
   const styles = useStyles();
   const now = useNow(true, 1000);
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1.65, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      false
+    );
+  }, [pulse]);
+
+  const animatedHalo = useAnimatedStyle(() => ({
+    transform: [{ scale: pulse.value }],
+    opacity: Math.max(0, 0.7 - (pulse.value - 1) * 0.9),
+  }));
+
   return (
     <View style={styles.clock} accessibilityLabel={`Workout time ${formatClock((now - startedAt) / 1000)}`}>
-      <View style={styles.liveDot} />
+      <View style={styles.liveDotWrap}>
+        <Animated.View style={[styles.liveDotHalo, animatedHalo]} />
+        <View style={styles.liveDot} />
+      </View>
       <Text style={styles.clockText}>{formatClock((now - startedAt) / 1000)}</Text>
     </View>
   );
@@ -719,10 +781,23 @@ const useStyles = makeStyles(({ colors }) => ({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  liveDotWrap: {
+    width: 14,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liveDotHalo: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.error,
+  },
   liveDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: colors.error,
   },
   clockText: {

@@ -25,6 +25,7 @@ import { makeStyles, radius, spacing, useTheme } from '../../theme';
 import { formatRelativeDay, parseNumberInput } from '../../lib/format';
 import { newSet, type DraftExercise, type DraftSet } from './draft';
 import { formatClock } from './RestTimer';
+import { useAuth } from '../../providers/auth';
 
 const INCLINE_PRESETS = [
   { label: '0%', value: '0', desc: 'Flat' },
@@ -67,6 +68,16 @@ export function CardioExerciseCard({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const { user } = useAuth();
+  const weightKg = user?.profile?.weight_kg;
+
+  // Calories = MET * weight (kg) * duration (hours). Only used as a starting
+  // suggestion — never overwrites a value the person already typed in.
+  const estimateCalories = (durationMinutesStr: string): string | undefined => {
+    const mins = parseFloat(durationMinutesStr);
+    if (!ex.metValue || !weightKg || !mins || mins <= 0) return undefined;
+    return String(Math.round(ex.metValue * weightKg * (mins / 60)));
+  };
 
   const [activeIntervalIndex, setActiveIntervalIndex] = useState(0);
   const [showExtras, setShowExtras] = useState(false);
@@ -75,6 +86,19 @@ export function CardioExerciseCard({
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const updateSet = (key: string, patch: Partial<DraftSet>) =>
+    onChange((e) => ({
+      ...e,
+      sets: e.sets.map((s) => (s.key === key ? { ...s, ...patch } : s)),
+    }));
+
+  const updateInterval = (idx: number, patch: Partial<DraftSet>) => {
+    const targetSet = ex.sets[idx];
+    if (targetSet) {
+      updateSet(targetSet.key, patch);
+    }
+  };
 
   useEffect(() => {
     if (isTimerRunning) {
@@ -95,20 +119,7 @@ export function CardioExerciseCard({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isTimerRunning, activeIntervalIndex]);
-
-  const updateSet = (key: string, patch: Partial<DraftSet>) =>
-    onChange((e) => ({
-      ...e,
-      sets: e.sets.map((s) => (s.key === key ? { ...s, ...patch } : s)),
-    }));
-
-  const updateInterval = (idx: number, patch: Partial<DraftSet>) => {
-    const targetSet = ex.sets[idx];
-    if (targetSet) {
-      updateSet(targetSet.key, patch);
-    }
-  };
+  }, [isTimerRunning, activeIntervalIndex, updateInterval]);
 
   const activeSet = ex.sets[activeIntervalIndex] || ex.sets[0];
 
@@ -126,7 +137,8 @@ export function CardioExerciseCard({
 
   const handleDurationPreset = (mins: number) => {
     if (activeSet) {
-      updateSet(activeSet.key, { durationMinutes: String(mins) });
+      const suggested = activeSet.calories ? {} : { calories: estimateCalories(String(mins)) };
+      updateSet(activeSet.key, { durationMinutes: String(mins), ...suggested });
     }
   };
 
@@ -135,7 +147,8 @@ export function CardioExerciseCard({
       setIsTimerRunning(false);
       if (elapsedSeconds > 30 && activeSet) {
         const roundedMins = Math.max(1, Math.round(elapsedSeconds / 60));
-        updateSet(activeSet.key, { durationMinutes: String(roundedMins) });
+        const suggested = activeSet.calories ? {} : { calories: estimateCalories(String(roundedMins)) };
+        updateSet(activeSet.key, { durationMinutes: String(roundedMins), ...suggested });
       }
     } else {
       setIsTimerRunning(true);
@@ -357,7 +370,10 @@ export function CardioExerciseCard({
             <TextInput
               style={[styles.input, styles.inputCol]}
               value={s.durationMinutes}
-              onChangeText={(durationMinutes) => updateSet(s.key, { durationMinutes })}
+              onChangeText={(durationMinutes) => {
+                const suggested = s.calories ? {} : { calories: estimateCalories(durationMinutes) };
+                updateSet(s.key, { durationMinutes, ...suggested });
+              }}
               onFocus={() => setActiveIntervalIndex(si)}
               keyboardType="number-pad"
               placeholder="15"
@@ -505,7 +521,7 @@ export function CardioExerciseCard({
               value={activeSet?.calories || ''}
               onChangeText={(calories) => activeSet && updateSet(activeSet.key, { calories })}
               keyboardType="number-pad"
-              placeholder="e.g. 180"
+              placeholder={estimateCalories(activeSet?.durationMinutes || '') || 'e.g. 180'}
               placeholderTextColor={colors.textMuted}
             />
           </View>

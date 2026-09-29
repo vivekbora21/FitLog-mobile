@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOut, LinearTransition, runOnJS } from 'react-native-reanimated';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import Svg, {
   Defs,
   LinearGradient,
@@ -34,8 +36,11 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  Utensils,
 } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import { api, extractErrorMessage } from '../../src/api/client';
+import { NutritionProgressSection } from '../../src/components/progress/NutritionProgressSection';
 import {
   Badge,
   Button,
@@ -52,10 +57,11 @@ import { haptics } from '../../src/lib/haptics';
 import { useAuth } from '../../src/providers/auth';
 import type { BodyMeasurement, PersonalRecord, WeightEntry } from '../../src/types';
 
-type TabKey = 'WEIGHT' | 'PRS' | 'MEASUREMENTS';
+type TabKey = 'WEIGHT' | 'NUTRITION' | 'PRS' | 'MEASUREMENTS';
 
 const TABS: { key: TabKey; label: string; icon: typeof Scale }[] = [
   { key: 'WEIGHT', label: 'Weight', icon: Scale },
+  { key: 'NUTRITION', label: 'Nutrition', icon: Utensils },
   { key: 'PRS', label: 'PR Records', icon: Trophy },
   { key: 'MEASUREMENTS', label: 'Measurements', icon: Ruler },
 ];
@@ -70,6 +76,7 @@ export default function ProgressScreen() {
   const styles = useStyles();
   const bottomClearance = useTabBarClearance();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabKey>('WEIGHT');
 
@@ -82,6 +89,16 @@ export default function ProgressScreen() {
   } = useQuery({
     queryKey: ['weights'],
     queryFn: () => api.getWeights(),
+  });
+
+  const {
+    data: nutritionHistory,
+    isLoading: isNutritionLoading,
+    isRefetching: isNutritionRefetching,
+    refetch: refetchNutrition,
+  } = useQuery({
+    queryKey: ['nutritionHistory', 60],
+    queryFn: () => api.getNutritionHistory(60),
   });
 
   const {
@@ -109,10 +126,19 @@ export default function ProgressScreen() {
     queryFn: () => api.getDashboardStats(),
   });
 
-  const isRefreshing = isWeightsRefetching || isPrsRefetching || isMeasurementsRefetching;
+  const isRefreshing =
+    isWeightsRefetching ||
+    isNutritionRefetching ||
+    isPrsRefetching ||
+    isMeasurementsRefetching;
   const onRefresh = async () => {
     haptics.light();
-    await Promise.all([refetchWeights(), refetchPrs(), refetchMeasurements()]);
+    await Promise.all([
+      refetchWeights(),
+      refetchNutrition(),
+      refetchPrs(),
+      refetchMeasurements(),
+    ]);
   };
 
   // Weight Logging State
@@ -285,14 +311,22 @@ export default function ProgressScreen() {
             <PressableScale
                 haptic="selection"
                 onPress={() => {
-                  if (activeTab === 'MEASUREMENTS') {
+                  if (activeTab === 'NUTRITION') {
+                    router.push('/meal/add');
+                  } else if (activeTab === 'MEASUREMENTS') {
                     setIsLoggingMeasurement((v) => !v);
                   } else {
                     setIsLoggingWeight((v) => !v);
                   }
                 }}
                 style={styles.headerAddBtn}
-                accessibilityLabel={activeTab === 'MEASUREMENTS' ? 'Log measurement' : 'Log weight'}
+                accessibilityLabel={
+                  activeTab === 'NUTRITION'
+                    ? 'Log food'
+                    : activeTab === 'MEASUREMENTS'
+                    ? 'Log measurement'
+                    : 'Log weight'
+                }
               >
                 <Plus size={20} color="#FFFFFF" strokeWidth={2.4} />
               </PressableScale>
@@ -343,6 +377,15 @@ export default function ProgressScreen() {
             isSaving={logWeightMutation.isPending}
             onDelete={confirmDeleteWeight}
             isLoading={isWeightsLoading}
+          />
+        )}
+
+        {activeTab === 'NUTRITION' && (
+          <NutritionProgressSection
+            nutritionHistory={nutritionHistory}
+            weights={chronologicalWeights}
+            isLoading={isNutritionLoading}
+            onNavigateToNutrition={() => router.push('/(tabs)/nutrition')}
           />
         )}
 
@@ -661,42 +704,61 @@ function WeightSection({
                 prev != null ? Number((w.weight_kg - prev.weight_kg).toFixed(2)) : null;
 
               return (
-                <View key={w.id} style={styles.historyItem}>
-                  <View style={styles.historyLeft}>
-                    <View style={styles.historyDateBox}>
-                      <Calendar size={14} color={colors.primaryLight} />
-                      <Text style={styles.historyDate}>{formatDayLabel(w.date)}</Text>
+                <ReanimatedSwipeable
+                  key={w.id}
+                  friction={2}
+                  rightThreshold={48}
+                  overshootRight={false}
+                  onSwipeableOpen={(direction) => {
+                    if (direction === 'left') {
+                      haptics.medium();
+                      onDelete(w.id, `${w.weight_kg} kg on ${w.date}`);
+                    }
+                  }}
+                  renderRightActions={() => (
+                    <View style={styles.swipeDelete}>
+                      <Trash2 size={18} color="#FFFFFF" />
+                      <Text style={styles.swipeDeleteText}>Delete</Text>
                     </View>
-                    <Text style={styles.historyIsoDate}>{w.date}</Text>
-                  </View>
+                  )}
+                >
+                  <View style={styles.historyItem}>
+                    <View style={styles.historyLeft}>
+                      <View style={styles.historyDateBox}>
+                        <Calendar size={14} color={colors.primaryLight} />
+                        <Text style={styles.historyDate}>{formatDayLabel(w.date)}</Text>
+                      </View>
+                      <Text style={styles.historyIsoDate}>{w.date}</Text>
+                    </View>
 
-                  <View style={styles.historyRight}>
-                    <View style={styles.historyWeightCol}>
-                      <Text style={styles.historyWeightVal}>
-                        {w.weight_kg} <Text style={styles.historyWeightUnit}>kg</Text>
-                      </Text>
-                      {diff != null && (
-                        <Text
-                          style={[
-                            styles.historyDiff,
-                            diff < 0 ? styles.textSuccess : diff > 0 ? styles.textWarning : null,
-                          ]}
-                        >
-                          {diff > 0 ? `+${diff}` : `${diff}`} kg
+                    <View style={styles.historyRight}>
+                      <View style={styles.historyWeightCol}>
+                        <Text style={styles.historyWeightVal}>
+                          {w.weight_kg} <Text style={styles.historyWeightUnit}>kg</Text>
                         </Text>
-                      )}
-                    </View>
+                        {diff != null && (
+                          <Text
+                            style={[
+                              styles.historyDiff,
+                              diff < 0 ? styles.textSuccess : diff > 0 ? styles.textWarning : null,
+                            ]}
+                          >
+                            {diff > 0 ? `+${diff}` : `${diff}`} kg
+                          </Text>
+                        )}
+                      </View>
 
-                    <PressableScale
-                      haptic="medium"
-                      onPress={() => onDelete(w.id, `${w.weight_kg} kg on ${w.date}`)}
-                      style={styles.historyDeleteBtn}
-                      accessibilityLabel="Delete entry"
-                    >
-                      <Trash2 size={16} color={colors.textMuted} />
-                    </PressableScale>
+                      <PressableScale
+                        haptic="medium"
+                        onPress={() => onDelete(w.id, `${w.weight_kg} kg on ${w.date}`)}
+                        style={styles.historyDeleteBtn}
+                        accessibilityLabel="Delete entry"
+                      >
+                        <Trash2 size={16} color={colors.textMuted} />
+                      </PressableScale>
+                    </View>
                   </View>
-                </View>
+                </ReanimatedSwipeable>
               );
             })}
           </View>
@@ -724,7 +786,7 @@ function WeightSection({
   );
 }
 
-// Native SVG Line Chart for Weight
+// Native SVG Line Chart for Weight with Pan-to-Scrub Tooltip & Entrance Animation
 function WeightSvgChart({
   weights,
   targetWeight,
@@ -735,10 +797,19 @@ function WeightSvgChart({
   const { colors } = useTheme();
   const styles = useStyles();
   const [layoutWidth, setLayoutWidth] = useState(320);
+  const [scrubIndex, setScrubIndex] = useState<number | null>(null);
   const chartHeight = 180;
   const paddingHoriz = 24;
-  const paddingTop = 20;
+  const paddingTop = 26;
   const paddingBottom = 30;
+
+  useEffect(() => {
+    if (scrubIndex == null) return;
+    const timer = setTimeout(() => {
+      setScrubIndex(null);
+    }, 2200);
+    return () => clearTimeout(timer);
+  }, [scrubIndex]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -762,23 +833,30 @@ function WeightSvgChart({
   const innerW = layoutWidth - paddingHoriz * 2;
   const innerH = chartHeight - paddingTop - paddingBottom;
 
-  const points = weights.map((w, idx) => {
-    const x =
-      paddingHoriz +
-      (weights.length === 1 ? innerW / 2 : (idx / (weights.length - 1)) * innerW);
-    const y = paddingTop + (1 - (w.weight_kg - chartMin) / valRange) * innerH;
-    return { x, y, weight: w.weight_kg, date: w.date };
-  });
+  const points = useMemo(() => {
+    return weights.map((w, idx) => {
+      const x =
+        paddingHoriz +
+        (weights.length === 1 ? innerW / 2 : (idx / (weights.length - 1)) * innerW);
+      const y = paddingTop + (1 - (w.weight_kg - chartMin) / valRange) * innerH;
+      return { x, y, weight: w.weight_kg, date: w.date };
+    });
+  }, [weights, innerW, innerH, chartMin, valRange]);
 
   // SVG Line path
-  const linePath = points.reduce((acc, pt, i) => {
-    return i === 0 ? `M ${pt.x},${pt.y}` : `${acc} L ${pt.x},${pt.y}`;
-  }, '');
+  const linePath = useMemo(() => {
+    return points.reduce((acc, pt, i) => {
+      return i === 0 ? `M ${pt.x},${pt.y}` : `${acc} L ${pt.x},${pt.y}`;
+    }, '');
+  }, [points]);
 
   // Area path
-  const areaPath = `${linePath} L ${points[points.length - 1].x},${
-    chartHeight - paddingBottom
-  } L ${points[0].x},${chartHeight - paddingBottom} Z`;
+  const areaPath = useMemo(() => {
+    if (points.length === 0) return '';
+    return `${linePath} L ${points[points.length - 1].x},${
+      chartHeight - paddingBottom
+    } L ${points[0].x},${chartHeight - paddingBottom} Z`;
+  }, [linePath, points]);
 
   // Target Y
   const targetY =
@@ -786,114 +864,234 @@ function WeightSvgChart({
       ? paddingTop + (1 - (targetWeight - chartMin) / valRange) * innerH
       : null;
 
+  const onScrub = useCallback((touchX: number) => {
+    if (points.length === 0) return;
+    let closestIdx = 0;
+    let closestDist = Math.abs(points[0].x - touchX);
+    for (let i = 1; i < points.length; i++) {
+      const dist = Math.abs(points[i].x - touchX);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = i;
+      }
+    }
+    setScrubIndex((prev) => {
+      if (prev !== closestIdx) {
+        haptics.selection();
+      }
+      return closestIdx;
+    });
+  }, [points]);
+
+  const composedGesture = useMemo(() => {
+    const panGesture = Gesture.Pan()
+      .onBegin((e) => {
+        'worklet';
+        runOnJS(onScrub)(e.x);
+      })
+      .onUpdate((e) => {
+        'worklet';
+        runOnJS(onScrub)(e.x);
+      });
+
+    const tapGesture = Gesture.Tap()
+      .onEnd((e) => {
+        'worklet';
+        runOnJS(onScrub)(e.x);
+      });
+
+    return Gesture.Race(panGesture, tapGesture);
+  }, [onScrub]);
+
+  const activePoint = scrubIndex != null ? points[scrubIndex] : null;
+  const prevPoint = scrubIndex != null && scrubIndex > 0 ? points[scrubIndex - 1] : null;
+  const pointDelta =
+    activePoint && prevPoint
+      ? Math.round((activePoint.weight - prevPoint.weight) * 10) / 10
+      : null;
+
   return (
-    <View onLayout={onLayout} style={styles.chartContainer}>
-      <Svg width={layoutWidth} height={chartHeight}>
-        <Defs>
-          <LinearGradient id="chartGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <Stop offset="0%" stopColor={colors.primaryLight} stopOpacity="0.35" />
-            <Stop offset="100%" stopColor={colors.primaryLight} stopOpacity="0.0" />
-          </LinearGradient>
-        </Defs>
+    <Animated.View
+      entering={FadeInDown.duration(650).springify().damping(14)}
+      onLayout={onLayout}
+      style={styles.chartContainer}
+    >
+      <GestureDetector gesture={composedGesture}>
+        <View style={{ width: layoutWidth, height: chartHeight }}>
+          <Svg width={layoutWidth} height={chartHeight}>
+            <Defs>
+              <LinearGradient id="chartGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <Stop offset="0%" stopColor={colors.primaryLight} stopOpacity="0.35" />
+                <Stop offset="100%" stopColor={colors.primaryLight} stopOpacity="0.0" />
+              </LinearGradient>
+            </Defs>
 
-        {/* Baseline grid lines */}
-        <Line
-          x1={paddingHoriz}
-          y1={paddingTop}
-          x2={layoutWidth - paddingHoriz}
-          y2={paddingTop}
-          stroke={colors.borderSubtle}
-          strokeDasharray="4 4"
-        />
-        <Line
-          x1={paddingHoriz}
-          y1={paddingTop + innerH / 2}
-          x2={layoutWidth - paddingHoriz}
-          y2={paddingTop + innerH / 2}
-          stroke={colors.borderSubtle}
-          strokeDasharray="4 4"
-        />
-        <Line
-          x1={paddingHoriz}
-          y1={chartHeight - paddingBottom}
-          x2={layoutWidth - paddingHoriz}
-          y2={chartHeight - paddingBottom}
-          stroke={colors.borderSubtle}
-        />
+            {/* Baseline grid lines */}
+            <Line
+              x1={paddingHoriz}
+              y1={paddingTop}
+              x2={layoutWidth - paddingHoriz}
+              y2={paddingTop}
+              stroke={colors.borderSubtle}
+              strokeDasharray="4 4"
+            />
+            <Line
+              x1={paddingHoriz}
+              y1={paddingTop + innerH / 2}
+              x2={layoutWidth - paddingHoriz}
+              y2={paddingTop + innerH / 2}
+              stroke={colors.borderSubtle}
+              strokeDasharray="4 4"
+            />
+            <Line
+              x1={paddingHoriz}
+              y1={chartHeight - paddingBottom}
+              x2={layoutWidth - paddingHoriz}
+              y2={chartHeight - paddingBottom}
+              stroke={colors.borderSubtle}
+            />
 
-        {/* Target line */}
-        {targetY != null && (
-          <Line
-            x1={paddingHoriz}
-            y1={targetY}
-            x2={layoutWidth - paddingHoriz}
-            y2={targetY}
-            stroke={colors.cyan}
-            strokeDasharray="6 3"
-            strokeWidth={1.5}
-          />
-        )}
+            {/* Target line */}
+            {targetY != null && (
+              <Line
+                x1={paddingHoriz}
+                y1={targetY}
+                x2={layoutWidth - paddingHoriz}
+                y2={targetY}
+                stroke={colors.cyan}
+                strokeDasharray="6 3"
+                strokeWidth={1.5}
+              />
+            )}
 
-        {/* Shaded Area */}
-        <Path d={areaPath} fill="url(#chartGradient)" />
+            {/* Shaded Area */}
+            <Path d={areaPath} fill="url(#chartGradient)" />
 
-        {/* Stroke Line */}
-        <Path
-          d={linePath}
-          fill="none"
-          stroke={colors.primaryLight}
-          strokeWidth={3}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+            {/* Stroke Line */}
+            <Path
+              d={linePath}
+              fill="none"
+              stroke={colors.primaryLight}
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
 
-        {/* Data points */}
-        {points.map((pt, i) => (
-          <React.Fragment key={`pt-${i}`}>
-            <Circle cx={pt.x} cy={pt.y} r={5} fill={colors.surface} stroke={colors.primaryLight} strokeWidth={2.5} />
-          </React.Fragment>
-        ))}
+            {/* Data points */}
+            {points.map((pt, i) => (
+              <Circle
+                key={`pt-${i}`}
+                cx={pt.x}
+                cy={pt.y}
+                r={scrubIndex === i ? 6 : 4}
+                fill={scrubIndex === i ? colors.primaryLight : colors.surface}
+                stroke={colors.primaryLight}
+                strokeWidth={2}
+              />
+            ))}
 
-        {/* Axis Labels */}
-        <SvgText
-          x={paddingHoriz}
-          y={chartHeight - 10}
-          fill={colors.textMuted}
-          fontSize="10"
-          fontWeight="600"
-        >
-          {weights[0]?.date.slice(5)}
-        </SvgText>
-        <SvgText
-          x={layoutWidth - paddingHoriz}
-          y={chartHeight - 10}
-          fill={colors.textMuted}
-          fontSize="10"
-          fontWeight="600"
-          textAnchor="end"
-        >
-          {weights[weights.length - 1]?.date.slice(5)}
-        </SvgText>
-        <SvgText
-          x={layoutWidth - paddingHoriz + 2}
-          y={paddingTop + 4}
-          fill={colors.textMuted}
-          fontSize="9"
-          textAnchor="end"
-        >
-          {Math.round(chartMax)}kg
-        </SvgText>
-        <SvgText
-          x={layoutWidth - paddingHoriz + 2}
-          y={chartHeight - paddingBottom - 2}
-          fill={colors.textMuted}
-          fontSize="9"
-          textAnchor="end"
-        >
-          {Math.round(chartMin)}kg
-        </SvgText>
-      </Svg>
-    </View>
+            {/* Active Scrub Line & Halo */}
+            {activePoint && (
+              <>
+                <Line
+                  x1={activePoint.x}
+                  y1={paddingTop - 6}
+                  x2={activePoint.x}
+                  y2={chartHeight - paddingBottom}
+                  stroke={colors.primaryLight}
+                  strokeWidth={1.5}
+                  strokeDasharray="3 3"
+                />
+                <Circle
+                  cx={activePoint.x}
+                  cy={activePoint.y}
+                  r={10}
+                  fill={colors.primaryLight}
+                  fillOpacity={0.25}
+                />
+                <Circle
+                  cx={activePoint.x}
+                  cy={activePoint.y}
+                  r={5}
+                  fill={colors.primaryLight}
+                  stroke="#FFFFFF"
+                  strokeWidth={2}
+                />
+              </>
+            )}
+
+            {/* Axis Labels */}
+            <SvgText
+              x={paddingHoriz}
+              y={chartHeight - 10}
+              fill={colors.textMuted}
+              fontSize="10"
+              fontWeight="600"
+            >
+              {weights[0]?.date.slice(5)}
+            </SvgText>
+            <SvgText
+              x={layoutWidth - paddingHoriz}
+              y={chartHeight - 10}
+              fill={colors.textMuted}
+              fontSize="10"
+              fontWeight="600"
+              textAnchor="end"
+            >
+              {weights[weights.length - 1]?.date.slice(5)}
+            </SvgText>
+            <SvgText
+              x={layoutWidth - paddingHoriz + 2}
+              y={paddingTop + 4}
+              fill={colors.textMuted}
+              fontSize="9"
+              textAnchor="end"
+            >
+              {Math.round(chartMax)}kg
+            </SvgText>
+            <SvgText
+              x={layoutWidth - paddingHoriz + 2}
+              y={chartHeight - paddingBottom - 2}
+              fill={colors.textMuted}
+              fontSize="9"
+              textAnchor="end"
+            >
+              {Math.round(chartMin)}kg
+            </SvgText>
+          </Svg>
+
+          {/* Floating Scrub Tooltip */}
+          {activePoint && (
+            <Animated.View
+              entering={FadeIn.duration(150)}
+              exiting={FadeOut.duration(150)}
+              style={[
+                styles.chartTooltip,
+                {
+                  left: Math.max(8, Math.min(layoutWidth - 110, activePoint.x - 55)),
+                },
+              ]}
+              pointerEvents="none"
+            >
+              <Text style={styles.chartTooltipDate}>{activePoint.date}</Text>
+              <View style={styles.chartTooltipWeightRow}>
+                <Text style={styles.chartTooltipWeight}>{activePoint.weight} kg</Text>
+                {pointDelta != null && (
+                  <Text
+                    style={[
+                      styles.chartTooltipDelta,
+                      { color: pointDelta < 0 ? colors.success : pointDelta > 0 ? colors.warning : colors.textMuted },
+                    ]}
+                  >
+                    {pointDelta > 0 ? `+${pointDelta}` : `${pointDelta}`}
+                  </Text>
+                )}
+              </View>
+            </Animated.View>
+          )}
+        </View>
+      </GestureDetector>
+    </Animated.View>
   );
 }
 
@@ -988,8 +1186,13 @@ function PrsSection({
           />
         ) : (
           <View style={styles.prList}>
-            {visiblePrs.map((pr) => (
-              <Card key={pr.id} elevated style={styles.prItemCard}>
+            {visiblePrs.map((pr, idx) => (
+              <Animated.View
+                key={pr.id}
+                entering={FadeInDown.delay(Math.min(idx, 8) * 50).duration(300)}
+                layout={LinearTransition.duration(220)}
+              >
+              <Card elevated style={styles.prItemCard}>
                 <View style={styles.prHeader}>
                   <View style={styles.prIconBox}>
                     <Trophy size={18} color={colors.warning} />
@@ -1033,6 +1236,7 @@ function PrsSection({
                   </View>
                 </View>
               </Card>
+              </Animated.View>
             ))}
           </View>
         )}
@@ -1264,7 +1468,25 @@ function MeasurementsSection({
         ) : (
           <View style={styles.mLogList}>
             {visibleMeasurements.map((entry) => (
-              <Card key={entry.id} elevated style={styles.mLogCard}>
+              <ReanimatedSwipeable
+                key={entry.id}
+                friction={2}
+                rightThreshold={48}
+                overshootRight={false}
+                onSwipeableOpen={(direction) => {
+                  if (direction === 'left') {
+                    haptics.medium();
+                    onDelete(entry.id);
+                  }
+                }}
+                renderRightActions={() => (
+                  <View style={styles.swipeDelete}>
+                    <Trash2 size={18} color="#FFFFFF" />
+                    <Text style={styles.swipeDeleteText}>Delete</Text>
+                  </View>
+                )}
+              >
+              <Card elevated style={styles.mLogCard}>
                 <View style={styles.mLogHeader}>
                   <View style={styles.historyDateBox}>
                     <Calendar size={14} color={colors.cyan} />
@@ -1316,6 +1538,7 @@ function MeasurementsSection({
                   <Text style={styles.mNotesText}>“{entry.notes}”</Text>
                 ) : null}
               </Card>
+              </ReanimatedSwipeable>
             ))}
           </View>
         )}
@@ -1509,6 +1732,44 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
   chartContainer: {
     alignItems: 'center',
     marginTop: spacing.xs,
+    position: 'relative',
+  },
+  chartTooltip: {
+    position: 'absolute',
+    top: 0,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  chartTooltipDate: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  chartTooltipWeightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 1,
+  },
+  chartTooltipWeight: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  chartTooltipDelta: {
+    fontSize: 10,
+    fontWeight: '800',
   },
   emptyChartBox: {
     height: 120,
@@ -1655,6 +1916,20 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
   },
   historyDeleteBtn: {
     padding: spacing.xs,
+  },
+  swipeDelete: {
+    width: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    backgroundColor: colors.error,
+    borderRadius: radius.md,
+    marginVertical: 4,
+  },
+  swipeDeleteText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   searchBar: {
     flexDirection: 'row',

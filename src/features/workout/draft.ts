@@ -30,6 +30,8 @@ export interface DraftExercise {
   isCardio?: boolean;
   targetPrescription?: string;
   notes?: string;
+  /** Metabolic Equivalent of Task, used to suggest calories burned from duration. */
+  metValue?: number | null;
 }
 
 /** An in-progress new workout, saved on every change so a crash or kill never loses it. */
@@ -201,6 +203,7 @@ function firstRepNumber(targetReps?: string): string {
 export function exerciseFromRoutine(ex: RoutineExercise): DraftExercise {
   const exName = ex.swap?.exercise_name ?? ex.exercise_name;
   const exMuscle = ex.swap ? ex.swap.primary_muscle ?? undefined : ex.primary_muscle;
+  const exMetValue = ex.swap ? ex.swap.met_value : ex.met_value;
   const isCardio = isCardioExercise(exName, exMuscle);
 
   if (isCardio) {
@@ -229,6 +232,7 @@ export function exerciseFromRoutine(ex: RoutineExercise): DraftExercise {
       isCardio: true,
       targetPrescription: targetDesc || ex.target_reps,
       notes: ex.notes,
+      metValue: exMetValue,
       sets: [cardioSet],
     };
   }
@@ -243,6 +247,7 @@ export function exerciseFromRoutine(ex: RoutineExercise): DraftExercise {
     restSeconds: ex.rest_seconds || 90,
     isCardio: false,
     notes: ex.notes,
+    metValue: exMetValue,
     sets: Array.from({ length: Math.max(1, ex.target_sets || 1) }, () => newSet(weight ? String(weight) : '', reps)),
   };
 }

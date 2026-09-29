@@ -1,7 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Alert, ActivityIndicator, type StyleProp, type TextStyle } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Animated, {
+  FadeInDown,
+  LinearTransition,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { Search, Check, Minus, Plus, PencilLine, History } from 'lucide-react-native';
 import { api, extractErrorMessage, type MealType } from '../../src/api/client';
 import { Button, ChipGroup, Input, PressableScale, SheetScreen } from '../../src/components/ui';
@@ -17,6 +26,27 @@ const MEAL_TYPES: { value: MealType; label: string }[] = [
   { value: 'DINNER', label: 'Dinner' },
   { value: 'SNACK', label: 'Snack' },
 ];
+
+function BumpText({ value, style }: { value: string | number; style?: StyleProp<TextStyle> }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withSequence(
+      withTiming(1.28, { duration: 80 }),
+      withSpring(1, { damping: 10, stiffness: 220 })
+    );
+  }, [value, scale]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={animStyle}>
+      <Text style={style}>{value}</Text>
+    </Animated.View>
+  );
+}
 
 /** Per-serving macros for whatever the user picked, from search or recents. */
 interface PickedFood {
@@ -207,7 +237,7 @@ export default function AddMealScreen() {
           />
 
           {picked && (
-            <View style={styles.servingsCard}>
+            <Animated.View entering={FadeInDown.duration(220)} style={styles.servingsCard}>
               <Text style={styles.servingsTitle} numberOfLines={1}>
                 {picked.name}
               </Text>
@@ -223,7 +253,7 @@ export default function AddMealScreen() {
                   <Minus size={18} color={colors.textPrimary} />
                 </PressableScale>
                 <View style={styles.servingValueBox}>
-                  <Text style={styles.servingValue}>{servings}</Text>
+                  <BumpText value={servings} style={styles.servingValue} />
                   <Text style={styles.servingUnit}>{servings === 1 ? 'serving' : 'servings'}</Text>
                 </View>
                 <PressableScale
@@ -239,7 +269,7 @@ export default function AddMealScreen() {
                 {formatNumber(picked.calories * servings)} kcal · P {formatNumber(picked.protein_g * servings)}g · C{' '}
                 {formatNumber(picked.carbs_g * servings)}g · F {formatNumber(picked.fat_g * servings)}g
               </Text>
-            </View>
+            </Animated.View>
           )}
 
           <View style={styles.listHeader}>
@@ -255,36 +285,41 @@ export default function AddMealScreen() {
                 : 'Search for a food above, or add one with manual entry.'}
             </Text>
           ) : (
-            <View style={styles.list}>
+            <Animated.View layout={LinearTransition.springify()} style={styles.list}>
               {results.map((f, i) => {
                 const selected = picked?.key === f.key;
                 return (
-                  <PressableScale
+                  <Animated.View
                     key={f.key}
-                    haptic="selection"
-                    onPress={() => {
-                      setPicked(f);
-                      setServings(1);
-                    }}
-                    style={[styles.foodRow, i > 0 && styles.foodRowBorder, selected && styles.foodRowSelected]}
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={`${f.name}, ${formatNumber(f.calories)} calories per ${f.servingLabel}`}
+                    entering={FadeInDown.delay(Math.min(i * 35, 180)).duration(200)}
+                    layout={LinearTransition.springify()}
                   >
-                    <View style={styles.foodInfo}>
-                      <Text style={styles.foodName} numberOfLines={1}>
-                        {f.name}
-                      </Text>
-                      <Text style={styles.foodMeta} numberOfLines={1}>
-                        {f.servingLabel} · P {formatNumber(f.protein_g)} · C {formatNumber(f.carbs_g)} · F{' '}
-                        {formatNumber(f.fat_g)}
-                      </Text>
-                    </View>
-                    <Text style={styles.foodKcal}>{formatNumber(f.calories)}</Text>
-                    {selected && <Check size={18} color={colors.primaryLight} strokeWidth={3} />}
-                  </PressableScale>
+                    <PressableScale
+                      haptic="selection"
+                      onPress={() => {
+                        setPicked(f);
+                        setServings(1);
+                      }}
+                      style={[styles.foodRow, i > 0 && styles.foodRowBorder, selected && styles.foodRowSelected]}
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`${f.name}, ${formatNumber(f.calories)} calories per ${f.servingLabel}`}
+                    >
+                      <View style={styles.foodInfo}>
+                        <Text style={styles.foodName} numberOfLines={1}>
+                          {f.name}
+                        </Text>
+                        <Text style={styles.foodMeta} numberOfLines={1}>
+                          {f.servingLabel} · P {formatNumber(f.protein_g)} · C {formatNumber(f.carbs_g)} · F{' '}
+                          {formatNumber(f.fat_g)}
+                        </Text>
+                      </View>
+                      <Text style={styles.foodKcal}>{formatNumber(f.calories)}</Text>
+                      {selected && <Check size={18} color={colors.primaryLight} strokeWidth={3} />}
+                    </PressableScale>
+                  </Animated.View>
                 );
               })}
-            </View>
+            </Animated.View>
           )}
         </>
       ) : (

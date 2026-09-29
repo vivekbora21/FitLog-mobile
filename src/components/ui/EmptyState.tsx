@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 import { radius, spacing, makeStyles } from '../../theme';
 
 interface EmptyStateProps {
@@ -12,12 +12,26 @@ interface EmptyStateProps {
 export function EmptyState({ title, description, icon, action }: EmptyStateProps) {
   const styles = useStyles();
   return (
-    <View style={styles.container}>
-      {icon && <View style={styles.iconContainer}>{icon}</View>}
-      <Text style={styles.title}>{title}</Text>
-      {description && <Text style={styles.description}>{description}</Text>}
-      {action && <View style={styles.actionContainer}>{action}</View>}
-    </View>
+    <Animated.View entering={FadeIn.duration(320)} style={styles.container}>
+      {icon && (
+        <Animated.View entering={ZoomIn.delay(80).duration(320)} style={styles.iconContainer}>
+          {icon}
+        </Animated.View>
+      )}
+      <Animated.Text entering={FadeIn.delay(140).duration(320)} style={styles.title}>
+        {title}
+      </Animated.Text>
+      {description && (
+        <Animated.Text entering={FadeIn.delay(180).duration(320)} style={styles.description}>
+          {description}
+        </Animated.Text>
+      )}
+      {action && (
+        <Animated.View entering={FadeIn.delay(220).duration(320)} style={styles.actionContainer}>
+          {action}
+        </Animated.View>
+      )}
+    </Animated.View>
   );
 }
 

@@ -3,12 +3,13 @@ import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { ChevronLeft, Trash2, Check, Pencil } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../../src/api/client';
 import { Button, Card, ErrorState, PressableScale, ScreenSkeleton, useToast } from '../../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import type { WorkoutSession } from '../../src/types';
-import { formatDuration, formatVolume } from '../../src/lib/format';
+import { formatDuration, formatVolume, toDateKey } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
 import { isCardioExercise } from '../../src/features/workout/draft';
@@ -32,6 +33,11 @@ export default function WorkoutDetailScreen() {
         .getQueriesData<{ pages: { results: WorkoutSession[] }[] }>({ queryKey: ['workoutSessions'] })
         .flatMap(([, d]) => d?.pages?.flatMap((p) => p.results) ?? [])
         .find((s) => s.id === id),
+  });
+
+  const { data: cardioEntries = [] } = useQuery({
+    queryKey: ['cardioEntries'],
+    queryFn: () => api.getCardioEntries(),
   });
 
   const deleteMutation = useMutation({
@@ -102,76 +108,90 @@ export default function WorkoutDetailScreen() {
 
   const started = session.started_at ? new Date(session.started_at) : null;
   const totalSets = session.exercises?.reduce((n, ex) => n + (ex.sets?.length || 0), 0) ?? 0;
+  const cardioMinutes = started
+    ? cardioEntries
+        .filter((c) => c.date === toDateKey(started))
+        .reduce((sum, c) => sum + c.duration_minutes, 0)
+    : 0;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       {header}
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>{session.title || 'Workout Session'}</Text>
-        {started && (
-          <Text style={styles.date}>
-            {started.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-            {' · '}
-            {started.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-          </Text>
-        )}
+        <Animated.View entering={FadeInDown.duration(320)}>
+          <Text style={styles.title}>{session.title || 'Workout Session'}</Text>
+          {started && (
+            <Text style={styles.date}>
+              {started.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+              {' · '}
+              {started.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </Text>
+          )}
+        </Animated.View>
 
-        <View style={styles.statsRow}>
+        <Animated.View entering={FadeInDown.delay(70).duration(320)} style={styles.statsRow}>
           <Stat label="Volume" value={formatVolume(session.total_volume_kg)} />
           <Stat label="Duration" value={formatDuration(session.duration_seconds) ?? '--'} />
           <Stat label="Sets" value={String(totalSets)} />
-        </View>
+          {cardioMinutes > 0 && <Stat label="Cardio" value={`${cardioMinutes} min`} />}
+          {session.total_calories ? <Stat label="Calories" value={`${session.total_calories} kcal`} /> : null}
+        </Animated.View>
 
         {session.notes ? (
-          <Card style={styles.notesCard}>
-            <Text style={styles.notesLabel}>Notes</Text>
-            <Text style={styles.notesText}>{session.notes}</Text>
-          </Card>
+          <Animated.View entering={FadeInDown.delay(130).duration(300)}>
+            <Card style={styles.notesCard}>
+              <Text style={styles.notesLabel}>Notes</Text>
+              <Text style={styles.notesText}>{session.notes}</Text>
+            </Card>
+          </Animated.View>
         ) : null}
 
         {(session.exercises ?? []).map((ex, i) => {
           const isCardio = isCardioExercise(ex.exercise_name, ex.primary_muscle);
           return (
-            <Card key={ex.id ?? i} style={styles.exerciseCard}>
-              <View style={styles.exerciseHeaderRow}>
-                <Text style={styles.exerciseName}>{ex.exercise_name}</Text>
-                {isCardio && (
-                  <View style={styles.cardioBadge}>
-                    <Text style={styles.cardioBadgeText}>Cardio</Text>
-                  </View>
-                )}
-              </View>
-              {ex.primary_muscle ? <Text style={styles.exerciseMuscle}>{ex.primary_muscle}</Text> : null}
-              {(ex.sets ?? []).map((s) => {
-                const isCardioSet = isCardio || !!s.duration_seconds || s.incline_percent !== null && s.incline_percent !== undefined;
-                const cardioText = isCardioSet
-                  ? [
-                      s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : null,
-                      s.incline_percent !== null && s.incline_percent !== undefined ? `${s.incline_percent}% Incline` : null,
-                      s.speed_kmh ? `${s.speed_kmh} km/h` : null,
-                      s.intensity || null,
-                    ].filter(Boolean).join(' · ') || (s.reps ? `${s.reps} min` : 'Completed')
-                  : `${s.weight_kg} kg × ${s.reps}`;
+            <Animated.View key={ex.id ?? i} entering={FadeInDown.delay(150 + i * 45).duration(300)}>
+              <Card style={styles.exerciseCard}>
+                <View style={styles.exerciseHeaderRow}>
+                  <Text style={styles.exerciseName}>{ex.exercise_name}</Text>
+                  {isCardio && (
+                    <View style={styles.cardioBadge}>
+                      <Text style={styles.cardioBadgeText}>Cardio</Text>
+                    </View>
+                  )}
+                </View>
+                {ex.primary_muscle ? <Text style={styles.exerciseMuscle}>{ex.primary_muscle}</Text> : null}
+                {(ex.sets ?? []).map((s) => {
+                  const isCardioSet = isCardio || !!s.duration_seconds || s.incline_percent !== null && s.incline_percent !== undefined;
+                  const cardioText = isCardioSet
+                    ? [
+                        s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : null,
+                        s.incline_percent !== null && s.incline_percent !== undefined ? `${s.incline_percent}% Incline` : null,
+                        s.speed_kmh ? `${s.speed_kmh} km/h` : null,
+                        s.intensity || null,
+                        s.calories ? `${s.calories} kcal` : null,
+                      ].filter(Boolean).join(' · ') || (s.reps ? `${s.reps} min` : 'Completed')
+                    : `${s.weight_kg} kg × ${s.reps}`;
 
-                return (
-                  <View key={s.id ?? s.set_number} style={styles.setRow}>
-                    <Text style={styles.setNum}>
-                      {isCardioSet
-                        ? `Interval ${s.set_number}`
-                        : s.set_type && s.set_type !== 'NORMAL'
-                        ? SET_TYPE_LABEL[s.set_type]
-                        : `Set ${s.set_number}`}
-                    </Text>
-                    <Text style={styles.setValue}>{cardioText}</Text>
-                    {s.completed ? (
-                      <Check size={16} color={colors.primaryLight} strokeWidth={3} />
-                    ) : (
-                      <View style={styles.checkPlaceholder} />
-                    )}
-                  </View>
-                );
-              })}
-            </Card>
+                  return (
+                    <View key={s.id ?? s.set_number} style={styles.setRow}>
+                      <Text style={styles.setNum}>
+                        {isCardioSet
+                          ? `Interval ${s.set_number}`
+                          : s.set_type && s.set_type !== 'NORMAL'
+                          ? SET_TYPE_LABEL[s.set_type]
+                          : `Set ${s.set_number}`}
+                      </Text>
+                      <Text style={styles.setValue}>{cardioText}</Text>
+                      {s.completed ? (
+                        <Check size={16} color={colors.primaryLight} strokeWidth={3} />
+                      ) : (
+                        <View style={styles.checkPlaceholder} />
+                      )}
+                    </View>
+                  );
+                })}
+              </Card>
+            </Animated.View>
           );
         })}
 
@@ -179,16 +199,18 @@ export default function WorkoutDetailScreen() {
           <Text style={styles.emptyText}>No exercises were recorded for this session.</Text>
         )}
 
-        <Button
-          title="Delete workout"
-          variant="secondary"
-          icon={<Trash2 size={18} color={colors.error} />}
-          iconPosition="left"
-          loading={deleteMutation.isPending}
-          onPress={confirmDelete}
-          textStyle={{ color: colors.error }}
-          style={styles.deleteBtn}
-        />
+        <Animated.View entering={FadeInDown.delay(200 + (session.exercises?.length ?? 0) * 45).duration(300)}>
+          <Button
+            title="Delete workout"
+            variant="secondary"
+            icon={<Trash2 size={18} color={colors.error} />}
+            iconPosition="left"
+            loading={deleteMutation.isPending}
+            onPress={confirmDelete}
+            textStyle={{ color: colors.error }}
+            style={styles.deleteBtn}
+          />
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );

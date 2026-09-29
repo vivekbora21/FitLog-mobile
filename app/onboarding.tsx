@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInRight, ZoomIn } from 'react-native-reanimated';
 import { ArrowRight, Check, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
 import { Button, ChipGroup, Input, PressableScale, ProgressBar, SheetScreen } from '../src/components/ui';
@@ -50,6 +50,48 @@ const GOAL_OPTIONS = [
 ];
 
 const WORKOUT_OPTIONS = [2, 3, 4, 5, 6].map((n) => ({ value: n, label: `${n}×` }));
+
+interface StepBadgeItemProps {
+  stepNumber: number;
+  label: string;
+  isCompleted: boolean;
+  isCurrent: boolean;
+}
+
+function StepBadgeItem({ stepNumber, label, isCompleted, isCurrent }: StepBadgeItemProps) {
+  const styles = useStyles();
+
+  return (
+    <View
+      style={[
+        styles.stepDot,
+        isCurrent && styles.stepDotActive,
+        isCompleted && styles.stepDotCompleted,
+      ]}
+    >
+      {isCompleted ? (
+        <Animated.View entering={ZoomIn.duration(200)} style={styles.stepCheckCircle}>
+          <Check size={10} color="#FFFFFF" strokeWidth={3} />
+        </Animated.View>
+      ) : (
+        <View style={[styles.stepNumCircle, isCurrent && styles.stepNumCircleCurrent]}>
+          <Text style={[styles.stepNumText, isCurrent && styles.stepNumTextCurrent]}>
+            {stepNumber}
+          </Text>
+        </View>
+      )}
+      <Text
+        style={[
+          styles.stepDotText,
+          isCurrent && styles.stepDotTextActive,
+          isCompleted && styles.stepDotTextCompleted,
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
 
 export default function OnboardingScreen() {
   const { colors } = useTheme();
@@ -311,16 +353,16 @@ export default function OnboardingScreen() {
   })();
 
   const skipHeaderButton = (
-    <TouchableOpacity
+    <PressableScale
       onPress={skip}
       style={styles.skipHeaderBtn}
+      haptic="selection"
       accessibilityRole="button"
       accessibilityLabel="Skip profile and plan setup"
-      activeOpacity={0.7}
     >
       <Text style={styles.skipHeaderText}>Skip</Text>
       <ChevronRight size={14} color={colors.textMuted} />
-    </TouchableOpacity>
+    </PressableScale>
   );
 
   return (
@@ -363,9 +405,16 @@ export default function OnboardingScreen() {
               style={styles.flex}
             />
           </View>
-          <TouchableOpacity onPress={skip} style={styles.skipFooterLink} activeOpacity={0.6}>
+          <PressableScale
+            onPress={skip}
+            style={styles.skipFooterLink}
+            haptic="selection"
+            hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
+            accessibilityRole="button"
+            accessibilityLabel="Skip setup for now"
+          >
             <Text style={styles.skipFooterText}>Skip setup for now (you can fill this anytime)</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       }
     >
@@ -376,17 +425,11 @@ export default function OnboardingScreen() {
           style={styles.progress}
         />
         <View style={styles.stepBadgesRow}>
-          <View style={[styles.stepDot, step >= 0 && styles.stepDotActive]}>
-            <Text style={[styles.stepDotText, step >= 0 && styles.stepDotTextActive]}>1. Profile</Text>
-          </View>
-          <View style={styles.stepDotDivider} />
-          <View style={[styles.stepDot, step >= 1 && styles.stepDotActive]}>
-            <Text style={[styles.stepDotText, step >= 1 && styles.stepDotTextActive]}>2. Goals</Text>
-          </View>
-          <View style={styles.stepDotDivider} />
-          <View style={[styles.stepDot, step >= 2 && styles.stepDotActive]}>
-            <Text style={[styles.stepDotText, step >= 2 && styles.stepDotTextActive]}>3. Plan</Text>
-          </View>
+          <StepBadgeItem stepNumber={1} label="Profile" isCompleted={step > 0} isCurrent={step === 0} />
+          <View style={[styles.stepDotDivider, step > 0 && styles.stepDotDividerActive]} />
+          <StepBadgeItem stepNumber={2} label="Goals" isCompleted={step > 1} isCurrent={step === 1} />
+          <View style={[styles.stepDotDivider, step > 1 && styles.stepDotDividerActive]} />
+          <StepBadgeItem stepNumber={3} label="Plan" isCompleted={step === 2 && skipPlan} isCurrent={step === 2} />
         </View>
       </View>
 
@@ -587,13 +630,50 @@ const useStyles = makeStyles(({ colors }) => ({
     paddingHorizontal: spacing.xs,
   },
   stepDot: {
-    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 3,
     paddingHorizontal: spacing.sm,
     borderRadius: radius.full,
     backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   stepDotActive: {
     backgroundColor: colors.primarySurface,
+    borderColor: colors.primaryLight,
+  },
+  stepDotCompleted: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.primaryLight,
+  },
+  stepCheckCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumCircleCurrent: {
+    backgroundColor: colors.primaryLight,
+  },
+  stepNumText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  stepNumTextCurrent: {
+    color: '#FFFFFF',
   },
   stepDotText: {
     fontSize: 11,
@@ -604,11 +684,19 @@ const useStyles = makeStyles(({ colors }) => ({
     color: colors.primaryLight,
     fontWeight: '700',
   },
+  stepDotTextCompleted: {
+    color: colors.textPrimary,
+    fontWeight: '600',
+  },
   stepDotDivider: {
     flex: 1,
-    height: 1,
+    height: 2,
     backgroundColor: colors.border,
     marginHorizontal: spacing.xs,
+    borderRadius: radius.full,
+  },
+  stepDotDividerActive: {
+    backgroundColor: colors.primaryLight,
   },
   heading: {
     fontSize: 22,

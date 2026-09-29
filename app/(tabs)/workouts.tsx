@@ -3,14 +3,20 @@ import { Alert, View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeInDown,
+  LinearTransition,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {
   Dumbbell,
   CheckCircle2,
   Clock,
   Layers,
   ChevronDown,
-  ChevronUp,
   Moon,
   Check,
   Plus,
@@ -22,19 +28,22 @@ import {
   Repeat,
   SkipForward,
   SlidersHorizontal,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from 'lucide-react-native';
 import { api, extractErrorMessage, type CalendarDayInfo } from '../../src/api/client';
 import {
   Button,
   Card,
   Badge,
-  EmptyState,
   ErrorState,
   PressableScale,
   ScreenHeader,
   ScreenSkeleton,
   WeekCalendar,
   DayActionModal,
+  SnapStatusButton,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
@@ -207,11 +216,25 @@ export default function WorkoutsScreen() {
 
   const weekSummary = useMemo(() => {
     const weekAgo = mountedAt - 7 * 86_400_000;
+    const twoWeeksAgo = mountedAt - 14 * 86_400_000;
     const recent = sessions.filter((s) => s.started_at && new Date(s.started_at).getTime() >= weekAgo);
+    const prior = sessions.filter(
+      (s) => s.started_at && new Date(s.started_at).getTime() >= twoWeeksAgo && new Date(s.started_at).getTime() < weekAgo
+    );
+    const count = recent.length;
+    const priorCount = prior.length;
+    const volume = recent.reduce((sum, s) => sum + (s.total_volume_kg || 0), 0);
+    const priorVolume = prior.reduce((sum, s) => sum + (s.total_volume_kg || 0), 0);
+    const minutes = Math.round(recent.reduce((sum, s) => sum + (s.duration_seconds || 0), 0) / 60);
+    const priorMinutes = Math.round(prior.reduce((sum, s) => sum + (s.duration_seconds || 0), 0) / 60);
+
     return {
-      count: recent.length,
-      volume: recent.reduce((sum, s) => sum + (s.total_volume_kg || 0), 0),
-      minutes: Math.round(recent.reduce((sum, s) => sum + (s.duration_seconds || 0), 0) / 60),
+      count,
+      countDelta: count - priorCount,
+      volume,
+      volumeDelta: Math.round(volume - priorVolume),
+      minutes,
+      minutesDelta: minutes - priorMinutes,
     };
   }, [sessions, mountedAt]);
 
@@ -281,21 +304,30 @@ export default function WorkoutsScreen() {
             value={String(weekSummary.count)}
             label="Sessions"
             tint={colors.primarySurface}
+            delta={weekSummary.countDelta}
           />
           <SummaryTile
             icon={<Layers size={16} color={colors.cyan} />}
             value={formatVolume(weekSummary.volume)}
             label="Volume"
             tint={colors.cyanGlow}
+            delta={weekSummary.volumeDelta}
+            deltaFormatted={
+              weekSummary.volumeDelta !== 0
+                ? `${weekSummary.volumeDelta > 0 ? '+' : ''}${formatVolume(weekSummary.volumeDelta)}`
+                : null
+            }
           />
           <SummaryTile
             icon={<Clock size={16} color={colors.amber} />}
             value={weekSummary.minutes ? `${weekSummary.minutes}m` : '0m'}
             label="Time"
             tint={colors.amberGlow}
+            delta={weekSummary.minutesDelta}
+            deltaUnit="m"
           />
         </Animated.View>
-        <Text style={styles.summaryCaption}>Last 7 days</Text>
+        <Text style={styles.summaryCaption}>Last 7 days · trend vs prior 7 days</Text>
 
         {/* Plan & Progress links */}
         <Animated.View entering={enter(1)} style={styles.linksRow}>
@@ -477,11 +509,7 @@ export default function WorkoutsScreen() {
                       <Text style={styles.showMoreText}>
                         {showAllExercises ? 'Show less' : `Show ${hiddenCount} more`}
                       </Text>
-                      {showAllExercises ? (
-                        <ChevronUp size={16} color={colors.primaryLight} />
-                      ) : (
-                        <ChevronDown size={16} color={colors.primaryLight} />
-                      )}
+                      <AnimatedChevron expanded={showAllExercises} color={colors.primaryLight} />
                     </PressableScale>
                   )}
                 </Animated.View>
@@ -561,6 +589,7 @@ export default function WorkoutsScreen() {
                       {[
                         formatDuration(selectedDateSessions[0].duration_seconds),
                         selectedDateSessions[0].total_volume_kg ? formatVolume(selectedDateSessions[0].total_volume_kg) : null,
+                        selectedDateSessions[0].total_calories ? `${selectedDateSessions[0].total_calories} kcal` : null,
                         selectedDateSessions[0].exercises?.length ? `${selectedDateSessions[0].exercises.length} exercises` : null,
                       ]
                         .filter(Boolean)
@@ -647,80 +676,59 @@ export default function WorkoutsScreen() {
 
                 {/* 1-tap quick status selector */}
                 <View style={styles.statusRow}>
-                  <PressableScale
-                    style={[
-                      styles.statusBtn,
-                      selectedDayInfo?.status === 'COMPLETED' && styles.statusBtnActive,
-                    ]}
+                  <SnapStatusButton
+                    label="Done"
+                    icon={
+                      <Check
+                        size={14}
+                        color={selectedDayInfo?.status === 'COMPLETED' ? colors.primaryLight : colors.textSecondary}
+                      />
+                    }
+                    active={selectedDayInfo?.status === 'COMPLETED'}
+                    activeColor={colors.primaryLight}
+                    activeBackground={colors.primarySurface}
                     onPress={() => statusMutation.mutate('COMPLETED')}
                     disabled={statusMutation.isPending}
-                  >
-                    <Check
-                      size={14}
-                      color={selectedDayInfo?.status === 'COMPLETED' ? colors.primaryLight : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.statusBtnText,
-                        selectedDayInfo?.status === 'COMPLETED' && styles.statusBtnTextActive,
-                      ]}
-                    >
-                      Done
-                    </Text>
-                  </PressableScale>
+                  />
 
-                  <PressableScale
-                    style={[
-                      styles.statusBtn,
-                      selectedDayInfo?.status === 'REST' && styles.statusBtnActive,
-                    ]}
+                  <SnapStatusButton
+                    label="Rest"
+                    icon={
+                      <Moon
+                        size={14}
+                        color={selectedDayInfo?.status === 'REST' ? colors.cyan : colors.textSecondary}
+                      />
+                    }
+                    active={selectedDayInfo?.status === 'REST'}
+                    activeColor={colors.cyan}
+                    activeBackground={colors.cyanGlow}
                     onPress={() => statusMutation.mutate('REST')}
                     disabled={statusMutation.isPending}
-                  >
-                    <Moon
-                      size={14}
-                      color={selectedDayInfo?.status === 'REST' ? colors.cyan : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.statusBtnText,
-                        selectedDayInfo?.status === 'REST' && { color: colors.cyan },
-                      ]}
-                    >
-                      Rest
-                    </Text>
-                  </PressableScale>
+                  />
 
-                  <PressableScale
-                    style={[
-                      styles.statusBtn,
-                      selectedDayInfo?.status === 'SKIPPED' && styles.statusBtnActive,
-                    ]}
+                  <SnapStatusButton
+                    label="Skip"
+                    icon={
+                      <FastForward
+                        size={14}
+                        color={selectedDayInfo?.status === 'SKIPPED' ? colors.warning : colors.textSecondary}
+                      />
+                    }
+                    active={selectedDayInfo?.status === 'SKIPPED'}
+                    activeColor={colors.warning}
+                    activeBackground={colors.amberGlow}
                     onPress={() => statusMutation.mutate('SKIPPED')}
                     disabled={statusMutation.isPending}
-                  >
-                    <FastForward
-                      size={14}
-                      color={selectedDayInfo?.status === 'SKIPPED' ? colors.warning : colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.statusBtnText,
-                        selectedDayInfo?.status === 'SKIPPED' && { color: colors.warning },
-                      ]}
-                    >
-                      Skip
-                    </Text>
-                  </PressableScale>
+                  />
 
                   {selectedDayInfo?.status && (
-                    <PressableScale
-                      style={[styles.statusBtn, { flex: 0.6 }]}
+                    <SnapStatusButton
+                      icon={<RotateCcw size={13} color={colors.textMuted} />}
+                      flex={0.5}
                       onPress={() => statusMutation.mutate('CLEAR')}
                       disabled={statusMutation.isPending}
-                    >
-                      <RotateCcw size={13} color={colors.textMuted} />
-                    </PressableScale>
+                      accessibilityLabel="Reset status"
+                    />
                   )}
                 </View>
 
@@ -869,21 +877,76 @@ export default function WorkoutsScreen() {
   );
 }
 
+function AnimatedChevron({ expanded, color }: { expanded: boolean; color: string }) {
+  const rotation = useSharedValue(expanded ? 180 : 0);
+  React.useEffect(() => {
+    rotation.set(withTiming(expanded ? 180 : 0, { duration: 250, easing: Easing.out(Easing.cubic) }));
+  }, [expanded, rotation]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <ChevronDown size={16} color={color} />
+    </Animated.View>
+  );
+}
+
 function SummaryTile({
   icon,
   value,
   label,
   tint,
+  delta,
+  deltaUnit,
+  deltaFormatted,
 }: {
   icon: React.ReactNode;
   value: string;
   label: string;
   tint: string;
+  delta?: number | null;
+  deltaUnit?: string;
+  deltaFormatted?: string | null;
 }) {
+  const { colors } = useTheme();
   const styles = useStyles();
+
+  const formatted =
+    deltaFormatted !== undefined
+      ? deltaFormatted
+      : delta != null && delta !== 0
+      ? `${delta > 0 ? '+' : ''}${delta}${deltaUnit ? deltaUnit : ''}`
+      : null;
+
   return (
     <View style={styles.summaryTile} accessible accessibilityLabel={`${label}: ${value}`}>
-      <View style={[styles.summaryIcon, { backgroundColor: tint }]}>{icon}</View>
+      <View style={styles.summaryTopRow}>
+        <View style={[styles.summaryIcon, { backgroundColor: tint }]}>{icon}</View>
+        {formatted ? (
+          <View style={styles.deltaBadge}>
+            {delta != null && delta > 0 ? (
+              <TrendingUp size={10} color={colors.success} strokeWidth={2.6} />
+            ) : delta != null && delta < 0 ? (
+              <TrendingDown size={10} color={colors.warning} strokeWidth={2.6} />
+            ) : (
+              <Minus size={10} color={colors.textMuted} strokeWidth={2} />
+            )}
+            <Text
+              style={[
+                styles.deltaText,
+                delta != null && delta > 0 && { color: colors.success },
+                delta != null && delta < 0 && { color: colors.warning },
+              ]}
+              numberOfLines={1}
+            >
+              {formatted}
+            </Text>
+          </View>
+        ) : null}
+      </View>
       <Text style={styles.summaryValue} numberOfLines={1} adjustsFontSizeToFit>
         {value}
       </Text>
@@ -1239,13 +1302,33 @@ const useStyles = makeStyles(({ colors }) => ({
     borderColor: colors.border,
     padding: spacing.md,
   },
+  summaryTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  deltaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+  },
+  deltaText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textSecondary,
+  },
   summaryIcon: {
     width: 30,
     height: 30,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   summaryValue: {
     fontSize: 18,

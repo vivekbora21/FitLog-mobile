@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { View, Alert } from 'react-native';
+import { View, Alert, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { api, extractErrorMessage } from '../src/api/client';
-import { Button, ChipGroup, Input, SheetScreen } from '../src/components/ui';
-import { spacing, makeStyles } from '../src/theme';
+import { Badge, Button, ChipGroup, Input, SheetScreen, Skeleton } from '../src/components/ui';
+import { radius, spacing, makeStyles } from '../src/theme';
 import type { UserProfile } from '../src/types';
 import { parseNumberInput, toDateKey, calculateAge, formatDobDisplay, isValidDateKey } from '../src/lib/format';
 import { useAuth } from '../src/providers/auth';
@@ -34,6 +35,14 @@ const GOAL_OPTIONS = [
   { value: 'ENDURANCE', label: 'Endurance' },
   { value: 'GENERAL_FITNESS', label: 'General fitness' },
 ];
+
+const GOAL_DESCRIPTIONS: Record<string, string> = {
+  STRENGTH: 'Powerlifting & heavy compound focus',
+  HYPERTROPHY: 'Maximise muscle volume & progressive overload',
+  FAT_LOSS: 'Caloric deficit & sustained fat reduction',
+  ENDURANCE: 'Cardiovascular output & stamina conditioning',
+  GENERAL_FITNESS: 'Holistic movement, mobility & vitality',
+};
 
 export default function EditProfileScreen() {
   const styles = useStyles();
@@ -95,6 +104,27 @@ export default function EditProfileScreen() {
     },
   });
 
+  if (!user) {
+    return (
+      <SheetScreen title="Edit profile">
+        <View style={{ gap: spacing.md, marginTop: spacing.md }}>
+          <View style={styles.row}>
+            <Skeleton height={56} borderRadius={radius.md} style={styles.half} />
+            <Skeleton height={56} borderRadius={radius.md} style={styles.half} />
+          </View>
+          <Skeleton height={56} borderRadius={radius.md} />
+          <Skeleton height={20} width="40%" />
+          <Skeleton height={44} borderRadius={radius.md} />
+          <View style={styles.row}>
+            <Skeleton height={56} borderRadius={radius.md} style={styles.half} />
+            <Skeleton height={56} borderRadius={radius.md} style={styles.half} />
+          </View>
+          <Skeleton height={44} borderRadius={radius.md} />
+        </View>
+      </SheetScreen>
+    );
+  }
+
   const parsedAge = calculateAge(dob.trim());
 
   return (
@@ -104,31 +134,38 @@ export default function EditProfileScreen() {
         <Button title="Save changes" size="lg" loading={saveMutation.isPending} onPress={() => saveMutation.mutate()} />
       }
     >
-      <View style={styles.row}>
+      <Animated.View entering={FadeInDown.delay(50).duration(340)} style={styles.row}>
         <Input label="First name" value={firstName} onChangeText={setFirstName} containerStyle={styles.half} />
         <Input label="Last name" value={lastName} onChangeText={setLastName} containerStyle={styles.half} />
-      </View>
-      <Input
-        label="Date of birth (YYYY-MM-DD)"
-        placeholder="e.g. 1998-05-15"
-        value={dob}
-        onChangeText={setDob}
-        autoCapitalize="none"
-        autoCorrect={false}
-        maxLength={10}
-        hint={
-          dob.trim() && isValidDateKey(dob.trim())
-            ? `${parsedAge != null ? `${parsedAge} years old · ` : ''}Born ${formatDobDisplay(dob.trim())}`
-            : 'Used to calculate age, metabolic rate (BMR) & daily calorie targets'
-        }
-      />
-      <ChipGroup
-        label="Biological sex (used for BMR & target calories)"
-        options={SEX_OPTIONS}
-        value={sex}
-        onChange={setSex}
-      />
-      <View style={styles.row}>
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(110).duration(340)}>
+        <Input
+          label="Date of birth (YYYY-MM-DD)"
+          placeholder="e.g. 1998-05-15"
+          value={dob}
+          onChangeText={setDob}
+          autoCapitalize="none"
+          autoCorrect={false}
+          maxLength={10}
+          hint={
+            dob.trim() && isValidDateKey(dob.trim())
+              ? `${parsedAge != null ? `${parsedAge} years old · ` : ''}Born ${formatDobDisplay(dob.trim())}`
+              : 'Used to calculate age, metabolic rate (BMR) & daily calorie targets'
+          }
+        />
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(170).duration(340)}>
+        <ChipGroup
+          label="Biological sex (used for BMR & target calories)"
+          options={SEX_OPTIONS}
+          value={sex}
+          onChange={setSex}
+        />
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(230).duration(340)} style={styles.row}>
         <Input
           label="Weight (kg)"
           keyboardType="decimal-pad"
@@ -143,19 +180,44 @@ export default function EditProfileScreen() {
           onChangeText={setHeight}
           containerStyle={styles.half}
         />
-      </View>
-      <ChipGroup label="Activity level" options={ACTIVITY_OPTIONS} value={activity} onChange={setActivity} />
-      <ChipGroup label="Fitness goal" options={GOAL_OPTIONS} value={goal} onChange={setGoal} />
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(290).duration(340)}>
+        <ChipGroup label="Activity level" options={ACTIVITY_OPTIONS} value={activity} onChange={setActivity} />
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(350).duration(340)}>
+        <View style={styles.goalHeaderRow}>
+          <Text style={styles.goalLabel}>Fitness goal</Text>
+          {goal && GOAL_DESCRIPTIONS[goal] && (
+            <Animated.View entering={FadeIn.duration(200)}>
+              <Badge label={GOAL_DESCRIPTIONS[goal]} tone="emerald" />
+            </Animated.View>
+          )}
+        </View>
+        <ChipGroup options={GOAL_OPTIONS} value={goal} onChange={setGoal} />
+      </Animated.View>
     </SheetScreen>
   );
 }
 
-const useStyles = makeStyles(() => ({
+const useStyles = makeStyles(({ colors }) => ({
   row: {
     flexDirection: 'row',
     gap: spacing.sm,
   },
   half: {
     flex: 1,
+  },
+  goalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  goalLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
 }));

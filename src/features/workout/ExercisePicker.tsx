@@ -15,6 +15,8 @@ export interface PickedExercise {
   muscle?: string;
   /** Primary muscle slug; 'cardio' marks a time-based exercise (treadmill, cycling, etc.). */
   muscleSlug?: string;
+  /** Metabolic Equivalent of Task, used to suggest calories burned from duration. */
+  metValue?: number | null;
 }
 
 interface Props {
@@ -32,6 +34,7 @@ interface Row {
   muscleSlug?: string;
   meta?: string;
   custom?: boolean;
+  metValue?: number | null;
 }
 
 export function ExercisePicker({ visible, onClose, onPick, selectedIds }: Props) {
@@ -78,6 +81,7 @@ export function ExercisePicker({ visible, onClose, onPick, selectedIds }: Props)
         muscleSlug: e.primary_muscle_slug,
         meta: [e.primary_muscle_name, e.equipment_name].filter(Boolean).join(' · '),
         custom: e.is_custom,
+        metValue: e.met_value,
       }));
   const loading = browsing ? recent.isLoading : results.isFetching;
 
@@ -147,7 +151,7 @@ export function ExercisePicker({ visible, onClose, onPick, selectedIds }: Props)
                 return (
                   <PressableScale
                     haptic="none"
-                    onPress={() => pick({ id: item.id, name: item.name, muscle: item.muscle, muscleSlug: item.muscleSlug })}
+                    onPress={() => pick({ id: item.id, name: item.name, muscle: item.muscle, muscleSlug: item.muscleSlug, metValue: item.metValue })}
                     style={styles.row}
                     accessibilityLabel={`Add ${item.name}${added ? ', already in workout' : ''}`}
                   >
