@@ -10,10 +10,10 @@
         "./assets/*"
       ],
       "@fitlog/shared": [
-        "../packages/shared/src/index"
+        "./src/shared/index"
       ],
       "@fitlog/shared/*": [
-        "../packages/shared/src/*"
+        "./src/shared/*"
       ]
     }
   },

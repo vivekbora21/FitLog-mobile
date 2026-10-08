@@ -3,12 +3,11 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
-// Resolve the shared runtime package directly. Pointing this alias at mobile/src/shared
-// creates a self-re-export cycle because that folder also re-exports @fitlog/shared.
-const sharedPackageRoot = path.resolve(__dirname, '../packages/shared');
-config.watchFolders = [...(config.watchFolders || []), sharedPackageRoot];
+// @fitlog/shared is vendored locally at src/shared (copied from packages/shared) so
+// that EAS cloud builds — which only have access to this repo, not sibling repos —
+// can resolve it. Do not point this back at ../packages/shared.
 config.resolver.extraNodeModules = {
-  '@fitlog/shared': path.resolve(sharedPackageRoot, 'src'),
+  '@fitlog/shared': path.resolve(__dirname, 'src/shared'),
 };
 
 // Enable wasm assets for expo-sqlite
