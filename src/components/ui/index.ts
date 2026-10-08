@@ -23,3 +23,4 @@ export * from './ConfirmModal';
 export * from './WaterCups';
 export * from './SnapStatusButton';
 export * from './ArcGauge';
+export * from './FitLogDumbbell';

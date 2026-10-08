@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getAccessToken, getRefreshToken, saveTokens, clearTokens, setAccessToken } from '../lib/secureStore';
+import { normalizeWorkoutDay } from '../lib/workout';
+import { parsePaginatedResponse, validateApiPayload, type DateRangeParams, type ApiErrorResponse } from '@fitlog/shared';
 import type {
   User,
   DashboardStats,
@@ -10,6 +12,7 @@ import type {
   MacroTarget,
   NutritionDayResponse,
   NutritionHistoryResponse,
+  CalorieBurnHistoryResponse,
   NutritionHistoryDay,
   JourneyPacingData,
   WorkoutSession,
@@ -27,6 +30,7 @@ import type {
   MuscleGroup,
   EquipmentType,
   RoutineExercise,
+  BlueprintWorkoutExercise,
   JourneyMode,
   CardioEntry,
   CardioEntryPayload,
@@ -43,10 +47,14 @@ export type { CalendarDayInfo, DayStatus };
 export interface ProgramDay {
   id: string;
   day_number: number;
+  calendar_date: string;
   label: string;
   is_optional: boolean;
   status: 'UPCOMING' | 'COMPLETED' | 'MISSED' | 'REST';
   routine?: string | null;
+  completed_session_id?: string | null;
+  completed_session_title?: string | null;
+  workout_payload?: BlueprintWorkoutExercise[] | null;
   routine_details?: {
     id: string;
     name: string;
@@ -69,6 +77,19 @@ export interface WorkoutPlan {
     target_weekly_rate_kg?: number | null;
   } | null;
   days: ProgramDay[];
+}
+
+export interface WorkoutDayView {
+  id: string;
+  day_number: number;
+  calendar_date: string;
+  label: string;
+  status: ProgramDay['status'];
+  is_optional: boolean;
+  routine?: string | null;
+  routine_details?: ProgramDay['routine_details'];
+  completed_session_id?: string | null;
+  completed_session_title?: string | null;
 }
 
 export function resolveDefaultApiUrl(): string {
@@ -139,15 +160,15 @@ export type WorkoutSessionPayload = {
     order: number;
     rest_seconds?: number;
     notes?: string;
-    sets: Pick<WorkoutSet, 'set_number' | 'set_type' | 'weight_kg' | 'reps' | 'completed'>[];
+    sets: (Pick<WorkoutSet, 'set_number' | 'set_type' | 'weight_kg' | 'reps' | 'completed'> & { rpe?: number | null; rir?: number | null })[];
   }[];
 };
 
 export class ApiError extends Error {
   status: number;
-  data: any;
+  data: ApiErrorResponse;
 
-  constructor(message: string, status: number, data?: any) {
+  constructor(message: string, status: number, data: ApiErrorResponse = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -186,6 +207,8 @@ function unwrapList<T>(data: T[] | { results?: T[] } | null | undefined): T[] {
   if (Array.isArray(data)) return data;
   return data?.results ?? [];
 }
+
+type PageResponse<T> = T[] | { results?: T[]; next?: string | null };
 
 class ApiClient {
   private baseUrl: string = DEFAULT_API_URL;
@@ -226,6 +249,7 @@ class ApiClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      'X-API-Version': '1',
       ...(options.headers as Record<string, string>),
     };
 
@@ -250,7 +274,7 @@ class ApiClient {
       if (networkError.name === 'AbortError') {
         throw new ApiError(TIMEOUT_MESSAGE, 408, networkError);
       }
-      throw new ApiError(OFFLINE_MESSAGE, 0, networkError);
+      throw new ApiError(OFFLINE_MESSAGE, 0, {});
     } finally {
       clearTimeout(timeoutId);
     }
@@ -306,6 +330,7 @@ class ApiClient {
           headers: {
             'Content-Type': 'application/json',
             Accept: 'application/json',
+      'X-API-Version': '1',
           },
           body: JSON.stringify({ refresh: refreshToken }),
         });
@@ -313,7 +338,7 @@ class ApiClient {
         // Server unreachable: keep the tokens so the session survives until we're back online.
         this.isRefreshing = false;
         this.onTokenRefreshed(null);
-        throw new ApiError(OFFLINE_MESSAGE, 0, networkError);
+        throw new ApiError(OFFLINE_MESSAGE, 0, {});
       }
 
       try {
@@ -342,7 +367,7 @@ class ApiClient {
         this.onTokenRefreshed(null);
         await clearTokens();
         if (this.unauthorizedHandler) this.unauthorizedHandler();
-        throw new ApiError('Session expired. Please log in again.', 401, refreshErr);
+        throw new ApiError('Session expired. Please log in again.', 401, {});
       }
 
       // Retry the original request outside the try, so its errors never wipe the session
@@ -362,7 +387,7 @@ class ApiClient {
       return {} as T;
     }
 
-    return response.json();
+    return validateApiPayload<T>(await response.json());
   }
 
   // Generic HTTP wrappers
@@ -516,7 +541,12 @@ class ApiClient {
   }
 
   async getWorkoutPlan(): Promise<WorkoutPlan> {
-    return this.get<WorkoutPlan>('/workouts/sessions/plan/');
+    const data = await this.get<WorkoutPlan>('/workouts/sessions/plan/');
+    return { ...data, days: data.days.map((day) => normalizeWorkoutDay(day) as ProgramDay) };
+  }
+
+  async getWorkoutDay(dateKey: string): Promise<{ program: WorkoutPlan['program']; today: ProgramDay | null }> {
+    return this.get('/workouts/sessions/today/', { date: dateKey });
   }
 
   // Archives the active journey (history is kept) and schedules a new one starting today.
@@ -548,6 +578,10 @@ class ApiClient {
     return unwrapList(await this.get('/workouts/sessions/'));
   }
 
+  async getCalorieBurnHistory(days: number = 30): Promise<CalorieBurnHistoryResponse> {
+    return this.get<CalorieBurnHistoryResponse>('/workouts/calorie-history/', { days });
+  }
+
   async getRoutines(): Promise<any[]> {
     return unwrapList(await this.get('/workouts/routines/'));
   }
@@ -557,8 +591,8 @@ class ApiClient {
     return this.get<NutritionDayResponse>(`/nutrition/${dateStr}/`);
   }
 
-  async getNutritionHistory(days: number = 30): Promise<NutritionHistoryResponse> {
-    return this.get<NutritionHistoryResponse>(`/nutrition-history/?days=${days}`);
+  async getNutritionHistory(days: number = 30, range: DateRangeParams = {}): Promise<NutritionHistoryResponse> {
+    return this.get<NutritionHistoryResponse>('/nutrition-history/', { days, ...range });
   }
 
   async getMacroTargets(): Promise<TargetsPayload> {
@@ -618,13 +652,10 @@ class ApiClient {
   }
 
   // Workouts (write)
-  async getWorkoutSessionsPage(page: number): Promise<{ results: WorkoutSession[]; next: string | null }> {
-    const data = await this.get<WorkoutSession[] | { results: WorkoutSession[]; next: string | null }>(
-      '/workouts/sessions/',
-      { page }
-    );
-    if (Array.isArray(data)) return { results: data, next: null };
-    return { results: data.results ?? [], next: data.next ?? null };
+  async getWorkoutSessionsPage(page: number, range: DateRangeParams = {}): Promise<{ results: WorkoutSession[]; next: string | null }> {
+    const data = await this.get<unknown>('/workouts/sessions/', { page, ...range });
+    const parsed = parsePaginatedResponse<WorkoutSession>(data);
+    return { results: parsed.results, next: parsed.next };
   }
 
   async getWorkoutSession(id: string): Promise<WorkoutSession> {
@@ -638,6 +669,13 @@ class ApiClient {
   // Replaces the session's exercises and sets; the server rebuilds affected PRs.
   async updateWorkoutSession(id: string, session: Omit<WorkoutSessionPayload, 'routine'>): Promise<WorkoutSession> {
     return this.put<WorkoutSession>(`/workouts/sessions/${id}/`, session);
+  }
+
+  // Partial update from the post-save completion screen (rating/note only).
+  // Omitting `exercises` leaves existing sets untouched — see WorkoutSessionSerializer.update,
+  // which only replaces exercises/sets when the `exercises` key is present in the body.
+  async completeWorkoutSession(id: string, patch: { overall_rpe?: number | null; notes?: string }): Promise<WorkoutSession> {
+    return this.patch<WorkoutSession>(`/workouts/sessions/${id}/`, patch);
   }
 
   async getLastPerformance(exerciseIds: string[], excludeSession?: string): Promise<Record<string, LastPerformance>> {
@@ -713,9 +751,30 @@ class ApiClient {
     return this.patch<User>('/auth/me/', payload);
   }
 
+  // Follows every page of a DRF list endpoint (default PAGE_SIZE=20) instead of
+  // reading page 1 only. The Progress screen derives starting weight, net change,
+  // and the chart's "ALL" range from the complete history, so silently dropping
+  // entries beyond the first page corrupts those calculations for long histories.
+  // Backend response shape is untouched either way (bare array or {results, next}).
+  private async getAllPages<T>(endpoint: string, params: Record<string, any> = {}): Promise<T[]> {
+    const all: T[] = [];
+    let page = 1;
+    for (;;) {
+      const data = await this.get<PageResponse<T>>(endpoint, { ...params, page });
+      if (Array.isArray(data)) {
+        all.push(...data);
+        break;
+      }
+      all.push(...(data.results ?? []));
+      if (!data.next) break;
+      page += 1;
+    }
+    return all;
+  }
+
   // Progress
-  async getWeights(): Promise<WeightEntry[]> {
-    return unwrapList(await this.get('/progress/weight/'));
+  async getWeights(params: DateRangeParams & { page?: number } = {}): Promise<WeightEntry[]> {
+    return this.getAllPages<WeightEntry>('/progress/weight/', params);
   }
 
   async logWeight(date: string, weight_kg: number): Promise<WeightEntry> {
@@ -734,8 +793,21 @@ class ApiClient {
     return unwrapList(await this.get('/progress/prs/'));
   }
 
+  async logPersonalRecord(data: {
+    exercise: string;
+    max_weight_kg: number;
+    reps: number;
+    achieved_at?: string;
+  }): Promise<PersonalRecord> {
+    return this.post<PersonalRecord>('/progress/prs/', data);
+  }
+
+  async deletePersonalRecord(id: string): Promise<void> {
+    await this.delete(`/progress/prs/${id}/`);
+  }
+
   async getBodyMeasurements(): Promise<BodyMeasurement[]> {
-    return unwrapList(await this.get('/progress/measurements/'));
+    return this.getAllPages<BodyMeasurement>('/progress/measurements/');
   }
 
   async logBodyMeasurement(data: {
@@ -754,6 +826,31 @@ class ApiClient {
 
   async deleteBodyMeasurement(id: string): Promise<void> {
     await this.delete(`/progress/measurements/${id}/`);
+  }
+
+  // ─── Progress Photos ────────────────────────────────────────────────────────
+
+  async getProgressPhotosByDate(): Promise<{ date: string; photos: any[] }[]> {
+    return this.get<{ date: string; photos: any[] }[]>('/progress/photos/by-date/');
+  }
+
+  async uploadProgressPhoto<T = unknown>(form: FormData): Promise<T> {
+    const token = await getAccessToken();
+    const url = `${this.baseUrl}/progress/photos/`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new ApiError(`Upload failed: ${response.status}`, response.status, data);
+    }
+    return validateApiPayload<T>(await response.json());
+  }
+
+  async deleteProgressPhoto(id: string): Promise<void> {
+    await this.delete(`/progress/photos/${id}/`);
   }
 }
 

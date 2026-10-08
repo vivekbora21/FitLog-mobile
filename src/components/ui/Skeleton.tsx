@@ -6,6 +6,7 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withTiming,
+  useReducedMotion,
 } from 'react-native-reanimated';
 import { radius, spacing, makeStyles } from '../../theme';
 
@@ -18,17 +19,19 @@ interface SkeletonProps {
 
 export function Skeleton({ width = '100%', height = 16, borderRadius = radius.md, style }: SkeletonProps) {
   const styles = useStyles();
+  const reducedMotion = useReducedMotion();
   const opacity = useSharedValue(0.45);
 
   useEffect(() => {
+    if (reducedMotion) return;
     opacity.set(withRepeat(
       withTiming(1, { duration: 850, easing: Easing.inOut(Easing.ease) }),
       -1,
       true
     ));
-  }, [opacity]);
+  }, [opacity, reducedMotion]);
 
-  const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: reducedMotion ? 0.65 : opacity.value }), [reducedMotion]);
 
   return (
     <Animated.View

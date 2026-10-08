@@ -45,6 +45,7 @@ import { ExerciseCard } from '../../src/features/workout/ExerciseCard';
 import { ExercisePicker } from '../../src/features/workout/ExercisePicker';
 import { RoutinePicker } from '../../src/features/workout/RoutinePicker';
 import { RestTimerBar, formatClock, useNow, useRestTimer } from '../../src/features/workout/RestTimer';
+import { PrCelebrationModal, type PrCelebrationData } from '../../src/components/progress/PrCelebrationModal';
 import type { WorkoutSession } from '../../src/types';
 
 const loggedReps = (reps: string) => (parseNumberInput(reps) ?? 0) > 0;
@@ -62,6 +63,7 @@ export default function LogWorkoutScreen() {
     resume?: string;
     routineId?: string;
     planDay?: string;
+    dayNumber?: string;
   }>();
   const editId = params.edit || null;
   const usePlan = params.plan === '1' && !editId;
@@ -119,6 +121,9 @@ export default function LogWorkoutScreen() {
           style: 'destructive',
           onPress: () => {
             clearWorkoutDraft();
+            setExercises([]);
+            setTitle('');
+            setNotes('');
             setReady(true);
           },
         },
@@ -160,7 +165,7 @@ export default function LogWorkoutScreen() {
 
   const isWaitingData = editId
     ? sessionQuery.isLoading
-    : params.routineId
+    : (params.dayNumber || params.routineId)
     ? planQuery.isLoading
     : usePlan
     ? todayQuery.isLoading
@@ -168,10 +173,12 @@ export default function LogWorkoutScreen() {
 
   // 2. One-time prefill from plan, routineId param, or from the session being edited
   if (!prefilled && ready && !isWaitingData) {
-    if (params.routineId) {
-      const matchDay = planQuery.data?.days?.find(
-        (d) => d.routine === params.routineId || d.routine_details?.id === params.routineId
-      );
+    if (params.dayNumber || params.routineId) {
+      const matchDay = params.dayNumber
+        ? planQuery.data?.days?.find((d) => d.day_number === Number(params.dayNumber))
+        : planQuery.data?.days?.find(
+            (d) => d.routine === params.routineId || d.routine_details?.id === params.routineId
+          );
       if (matchDay?.routine_details) {
         setPrefilled(true);
         setTitle(matchDay.routine_details.name || matchDay.label || 'Workout');
@@ -319,6 +326,8 @@ export default function LogWorkoutScreen() {
               set_type: s.type,
               weight_kg: parseNumberInput(s.weight) ?? 0,
               reps: Math.round(parseNumberInput(s.reps) ?? 0),
+              rpe: s.rpe ? (parseNumberInput(s.rpe) ?? null) : null,
+              rir: s.rir ? (parseNumberInput(s.rir) ?? null) : null,
               duration_seconds: s.durationMinutes ? Math.round((parseNumberInput(s.durationMinutes || '') ?? 0) * 60) : null,
               distance_km: parseNumberInput(s.distanceKm || '') ?? null,
               incline_percent: parseNumberInput(s.incline || '') ?? null,
@@ -335,17 +344,25 @@ export default function LogWorkoutScreen() {
     };
   };
 
+  const [celebratingPr, setCelebratingPr] = useState<PrCelebrationData | null>(null);
+  const [pendingSummaryNav, setPendingSummaryNav] = useState<(() => void) | null>(null);
+
   const saveMutation = useMutation({
     mutationFn: () =>
       editId
         ? api.updateWorkoutSession(editId, buildPayload())
         : api.createWorkoutSession({ ...buildPayload(), routine: linkRoutine }),
-    onSuccess: async () => {
+    onSuccess: async (data: any) => {
       haptics.success();
       if (!editId) clearWorkoutDraft();
       await invalidateTrackingData(queryClient);
-      toast({ message: editId ? 'Workout updated' : 'Workout saved — nice work!' });
-      router.back();
+      const goToSummary = () => router.replace({ pathname: '/workout/complete', params: { id: data.id } });
+      if (data?.new_prs && data.new_prs.length > 0) {
+        setCelebratingPr(data.new_prs[0]);
+        setPendingSummaryNav(() => goToSummary);
+      } else {
+        goToSummary();
+      }
     },
     onError: (err) => {
       haptics.error();
@@ -731,6 +748,16 @@ export default function LogWorkoutScreen() {
             },
           },
         ]}
+      />
+
+      <PrCelebrationModal
+        visible={!!celebratingPr}
+        pr={celebratingPr}
+        onClose={() => {
+          setCelebratingPr(null);
+          pendingSummaryNav?.();
+          setPendingSummaryNav(null);
+        }}
       />
     </SheetScreen>
   );

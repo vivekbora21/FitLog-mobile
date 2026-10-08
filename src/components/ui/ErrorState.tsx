@@ -1,6 +1,6 @@
 import React from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react-native';
-import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeIn, ZoomIn, useReducedMotion } from 'react-native-reanimated';
 import { Button } from './Button';
 import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
@@ -14,18 +14,19 @@ interface ErrorStateProps {
 export function ErrorState({ title = 'Something went wrong', message, onRetry, retrying }: ErrorStateProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const reducedMotion = useReducedMotion();
   return (
-    <Animated.View entering={FadeIn.duration(320)} style={styles.container}>
-      <Animated.View entering={ZoomIn.delay(80).duration(320)} style={styles.iconCircle}>
+    <Animated.View entering={reducedMotion ? undefined : FadeIn.duration(320)} style={styles.container}>
+      <Animated.View entering={reducedMotion ? undefined : ZoomIn.delay(80).duration(320)} style={styles.iconCircle}>
         <WifiOff size={30} color={colors.error} />
       </Animated.View>
-      <Animated.Text entering={FadeIn.delay(140).duration(320)} style={styles.title}>
+      <Animated.Text entering={reducedMotion ? undefined : FadeIn.delay(140).duration(320)} style={styles.title}>
         {title}
       </Animated.Text>
-      <Animated.Text entering={FadeIn.delay(180).duration(320)} style={styles.message}>
+      <Animated.Text entering={reducedMotion ? undefined : FadeIn.delay(180).duration(320)} style={styles.message}>
         {message}
       </Animated.Text>
-      <Animated.View entering={FadeIn.delay(220).duration(320)}>
+      <Animated.View entering={reducedMotion ? undefined : FadeIn.delay(220).duration(320)}>
         <Button
           title="Try Again"
           variant="primary"

@@ -62,6 +62,8 @@ export function WeeklyNutritionProgress({
   const [selectedWeekIndex, setSelectedWeekIndex] = useState(0);
 
   // Active week summary
+  const [entriesLimit, setEntriesLimit] = useState<5 | 7>(5);
+
   const activeWeek: WeeklyNutritionSummary | undefined = weeks[selectedWeekIndex] || weeks[0];
 
   const isCut = targetType === 'MAX' || planMode === 'CUT';
@@ -73,9 +75,7 @@ export function WeeklyNutritionProgress({
     return calculateMacroRatio(activeWeek.avg_protein, activeWeek.avg_carbs, activeWeek.avg_fat);
   }, [activeWeek]);
 
-  if (!activeWeek) {
-    return null;
-  }
+  const safeWeek = activeWeek ?? ({ days: [] } as unknown as WeeklyNutritionSummary);
 
   const {
     avg_calories,
@@ -95,7 +95,17 @@ export function WeeklyNutritionProgress({
     protein_adherence_pct,
     copilot_insight,
     days,
-  } = activeWeek;
+  } = safeWeek;
+
+  // Find maximum calorie day for the bar chart scaling
+  const maxDayCalories = Math.max(target_calories * 1.25, ...days.map((d) => d.total_calories), 2400);
+
+  const visibleDays = useMemo(() => {
+    if (entriesLimit === 7) return days;
+    return days.slice(0, 5);
+  }, [days, entriesLimit]);
+
+  if (!activeWeek) return null;
 
   const calDiff = avg_calories - target_calories;
   const isProteinMet = target_protein > 0 && avg_protein >= target_protein;
@@ -136,18 +146,6 @@ export function WeeklyNutritionProgress({
     }
   }
 
-  // Find maximum calorie day for the bar chart scaling
-  const maxDayCalories = Math.max(target_calories * 1.25, ...days.map((d) => d.total_calories), 2400);
-
-  // Entries limit: 5 entries (default) or 7 entries (full week)
-  const [entriesLimit, setEntriesLimit] = useState<5 | 7>(5);
-
-  const visibleDays = useMemo(() => {
-    if (entriesLimit === 7) {
-      return days;
-    }
-    return days.slice(0, 5);
-  }, [days, entriesLimit]);
 
   const handlePrevWeek = () => {
     if (selectedWeekIndex < weeks.length - 1) {

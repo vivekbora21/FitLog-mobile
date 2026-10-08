@@ -5,6 +5,7 @@ import {
   TextInput,
   TextInputProps,
   ViewStyle,
+  Platform,
 } from 'react-native';
 import { radius, spacing, makeStyles, useTheme } from '../../theme';
 
@@ -96,29 +97,52 @@ const useStyles = makeStyles(({ colors }) => ({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 52,
+    minHeight: 50,
     backgroundColor: colors.surfaceElevated,
     borderRadius: radius.md,
     borderWidth: 1.5,
     borderColor: colors.border,
     paddingHorizontal: spacing.md,
+    ...(Platform.OS === 'web'
+      ? ({
+          transition: 'border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease',
+        } as any)
+      : {}),
   },
   inputWrapperFocused: {
     borderColor: colors.primaryLight,
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surface,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 0 0 3px rgba(15, 118, 110, 0.15)',
+        } as any)
+      : {}),
   },
   inputWrapperError: {
     borderColor: colors.error,
     backgroundColor: colors.errorBackground,
+    ...(Platform.OS === 'web'
+      ? ({
+          boxShadow: '0 0 0 3px rgba(239, 68, 68, 0.15)',
+        } as any)
+      : {}),
   },
   input: {
     flex: 1,
     color: colors.textPrimary,
-    fontSize: 16,
-    paddingVertical: spacing.md,
+    fontSize: 15,
+    paddingVertical: Platform.OS === 'web' ? spacing.md : spacing.sm,
+    ...(Platform.OS === 'web'
+      ? ({
+          outlineStyle: 'none',
+          outlineWidth: 0,
+        } as any)
+      : {}),
   },
   iconContainer: {
     marginHorizontal: spacing.xs,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   errorText: {
     color: colors.error,

@@ -61,7 +61,9 @@ import {
   getProgramDayDate,
 } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
+import { invalidateWorkoutData } from '../../src/lib/queries';
 import { ResumeWorkoutBanner } from '../../src/features/workout/ResumeWorkoutBanner';
+import { getRoutineExerciseDisplayName } from '../../src/lib/workout';
 
 const COLLAPSED_EXERCISES = 4;
 const enter = (i: number) => FadeInDown.delay(60 + i * 60).duration(420);
@@ -131,6 +133,7 @@ export default function WorkoutsScreen() {
       api.updateCalendarDayStatus({ date: selectedDate, status: newStatus }),
     onSuccess: () => {
       haptics.success();
+      invalidateWorkoutData(queryClient, selectedDate);
       queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
       queryClient.invalidateQueries({ queryKey: ['workoutSessions'] });
       queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
@@ -150,8 +153,7 @@ export default function WorkoutsScreen() {
       api.swapExercise(payload),
     onSuccess: () => {
       haptics.success();
-      queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
-      queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
+      invalidateWorkoutData(queryClient, selectedDate);
       setSwapTarget(null);
     },
     onError: (err) => {
@@ -176,15 +178,22 @@ export default function WorkoutsScreen() {
     return getProgramDayDate(programStartDate, currentProgramDay);
   }, [programStartDate, currentProgramDay]);
 
+  const { data: selectedDateWorkout } = useQuery({
+    queryKey: ['workoutDay', selectedDate],
+    queryFn: () => api.getWorkoutDay(selectedDate),
+    enabled: Boolean(selectedDate),
+  });
+
   const selectedDateProgramDay = useMemo(() => {
     // Prefer the backend's drift-corrected day number (anchored to actual completion
     // dates); only fall back to the naive calendar-offset guess when the date falls
     // outside the stats window and calendar_days has nothing for it.
     return (
+      selectedDateWorkout?.today?.day_number ??
       selectedDayInfo?.program_day?.day_number ??
       getDateProgramDayNumber(programStartDate, selectedDate, programDurationDays)
     );
-  }, [selectedDayInfo, programStartDate, selectedDate, programDurationDays]);
+  }, [selectedDateWorkout, selectedDayInfo, programStartDate, selectedDate, programDurationDays]);
 
   const historyDailyLogs = useMemo(() => {
     const list = [];
@@ -286,7 +295,13 @@ export default function WorkoutsScreen() {
           title="Workouts"
           right={
             <PressableScale
-              onPress={() => router.push('/workout/log')}
+              onPress={() => {
+                if (!isDone && exercises.length > 0) {
+                  router.push({ pathname: '/workout/log', params: { plan: '1' } });
+                } else {
+                  router.push('/workout/log');
+                }
+              }}
               style={styles.headerAddBtn}
               accessibilityLabel="Log a workout"
             >
@@ -437,7 +452,7 @@ export default function WorkoutsScreen() {
               {exercises.length > 0 ? (
                 <Animated.View layout={LinearTransition.duration(250)} style={styles.exerciseList}>
                   {visibleExercises.map((ex, index) => {
-                    const displayName = ex.swap?.exercise_name || ex.exercise_name;
+                    const displayName = getRoutineExerciseDisplayName(ex);
                     const isSwapped = !!ex.swap;
                     return (
                       <Animated.View
@@ -569,12 +584,11 @@ export default function WorkoutsScreen() {
               <Text style={styles.sectionTitleInline}>
                 {formatSelectedDateTitle(selectedDate, selectedDateProgramDay)}
               </Text>
-              <PressableScale
-                onPress={() => setSelectedDate(todayKey)}
-                style={styles.backTodayBtn}
-              >
-                <Text style={styles.backTodayText}>Back to Today</Text>
-              </PressableScale>
+              {selectedDate !== todayKey && (
+                <PressableScale onPress={() => setSelectedDate(todayKey)} style={styles.backTodayBtn}>
+                  <Text style={styles.backTodayText}>Today</Text>
+                </PressableScale>
+              )}
             </View>
 
             {selectedDateSessions.length > 0 ? (
@@ -736,7 +750,20 @@ export default function WorkoutsScreen() {
                   title={`Log workout for ${formatShortDay(selectedDate)}`}
                   icon={<Plus size={18} color="#FFFFFF" />}
                   iconPosition="left"
-                  onPress={() => router.push({ pathname: '/workout/log', params: { date: selectedDate } })}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/workout/log',
+                      params: {
+                        date: selectedDate,
+                        ...(selectedDayInfo?.program_day?.routine_id
+                          ? {
+                              routineId: selectedDayInfo.program_day.routine_id,
+                              dayNumber: String(selectedDayInfo.program_day.day_number),
+                            }
+                          : {}),
+                      },
+                    })
+                  }
                   style={styles.todayAction}
                 />
               </Card>
@@ -797,6 +824,7 @@ export default function WorkoutsScreen() {
                       params: {
                         date: item.dateKey,
                         routineId: item.dayInfo?.program_day?.routine_id || undefined,
+                        dayNumber: item.dayInfo?.program_day?.day_number ? String(item.dayInfo.program_day.day_number) : undefined,
                       },
                     })
                   }
@@ -810,7 +838,11 @@ export default function WorkoutsScreen() {
                   onLogWorkout={() =>
                     router.push({
                       pathname: '/workout/log',
-                      params: { date: item.dateKey },
+                      params: {
+                        date: item.dateKey,
+                        routineId: item.dayInfo?.program_day?.routine_id || undefined,
+                        dayNumber: item.dayInfo?.program_day?.day_number ? String(item.dayInfo.program_day.day_number) : undefined,
+                      },
                     })
                   }
                 />

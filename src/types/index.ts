@@ -1,5 +1,5 @@
 // Re-export all domain models, contracts, and utilities from the shared package
-export * from '../shared';
+export * from '@fitlog/shared';
 
 // Mobile-specific navigation & UI types
 export interface AuthTokens {
@@ -7,8 +7,3 @@ export interface AuthTokens {
   refresh: string;
 }
 
-export interface ApiErrorResponse {
-  detail?: string;
-  message?: string;
-  [key: string]: any;
-}

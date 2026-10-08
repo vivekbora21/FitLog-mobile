@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, LayoutChangeEvent } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -9,13 +9,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { haptics } from '../../lib/haptics';
 import { radius, spacing, makeStyles, useTheme } from '../../theme';
+import { QuickAddSheet } from './QuickAddSheet';
 
 type TabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 
 export const TAB_BAR_HEIGHT = 64;
 const BAR_MARGIN = 12;
-const PILL_INSET = 6;
 const BAR_BORDER = 1;
+const FAB_SIZE = 52;
 const SPRING = { damping: 20, stiffness: 220, mass: 0.8 };
 
 /** Bottom padding a tab screen's scroll content needs to clear the floating bar. */
@@ -25,51 +26,31 @@ export function useTabBarClearance(): number {
 }
 
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {
-  const { colors } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
-  const [barWidth, setBarWidth] = useState(0);
-  const tabWidth = barWidth / state.routes.length;
-  const translateX = useSharedValue(0);
-
-  useEffect(() => {
-    if (tabWidth > 0) {
-      translateX.set(withSpring(state.index * tabWidth, SPRING));
-    }
-  }, [state.index, tabWidth, translateX]);
-
-  const pillStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
-  }));
-
-  const onLayout = (e: LayoutChangeEvent) => {
-    // Absolute children are positioned inside the border, so measure the inner width.
-    const width = e.nativeEvent.layout.width - BAR_BORDER * 2;
-    if (width !== barWidth) {
-      setBarWidth(width);
-      // Snap without animating on first layout / rotation.
-      translateX.set(state.index * (width / state.routes.length));
-    }
-  };
+  const [quickAddVisible, setQuickAddVisible] = useState(false);
 
   return (
     <View
       pointerEvents="box-none"
       style={[styles.wrapper, { paddingBottom: Math.max(insets.bottom, BAR_MARGIN) }]}
     >
-      <View style={styles.bar} onLayout={onLayout} accessibilityRole="tablist">
-        {tabWidth > 0 && (
-          <Animated.View
-            style={[styles.pill, { width: tabWidth - PILL_INSET * 2 }, pillStyle]}
-          />
-        )}
+      <View style={styles.bar} accessibilityRole="tablist">
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
+          const isHidden =
+            (options.tabBarItemStyle as { display?: string } | undefined)?.display === 'none';
+          if (isHidden) return null;
           const label = typeof options.title === 'string' ? options.title : route.name;
           const isFocused = state.index === index;
-          const color = isFocused ? colors.primaryLight : colors.textMuted;
+          const isAdd = route.name === 'add';
 
           const onPress = () => {
+            if (isAdd) {
+              haptics.selection();
+              setQuickAddVisible(true);
+              return;
+            }
             const event = navigation.emit({
               type: 'tabPress',
               target: route.key,
@@ -85,19 +66,32 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
             navigation.emit({ type: 'tabLongPress', target: route.key });
           };
 
+          if (isAdd) {
+            return (
+              <AddTabItem
+                key={route.key}
+                label={label}
+                icon={options.tabBarIcon?.({ focused: false, color: '#FFFFFF', size: 24 })}
+                onPress={onPress}
+                onLongPress={onLongPress}
+              />
+            );
+          }
+
           return (
             <TabItem
               key={route.key}
               label={label}
               focused={isFocused}
-              icon={options.tabBarIcon?.({ focused: isFocused, color, size: 22 })}
-              color={color}
+              tabBarIcon={options.tabBarIcon}
               onPress={onPress}
               onLongPress={onLongPress}
             />
           );
         })}
       </View>
+
+      <QuickAddSheet visible={quickAddVisible} onClose={() => setQuickAddVisible(false)} />
     </View>
   );
 }
@@ -105,15 +99,16 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
 interface TabItemProps {
   label: string;
   focused: boolean;
-  icon: React.ReactNode;
-  color: string;
+  tabBarIcon?: (props: { focused: boolean; color: string; size: number }) => React.ReactNode;
   onPress: () => void;
   onLongPress: () => void;
 }
 
-function TabItem({ label, focused, icon, color, onPress, onLongPress }: TabItemProps) {
+function TabItem({ label, focused, tabBarIcon, onPress, onLongPress }: TabItemProps) {
+  const { colors } = useTheme();
   const styles = useStyles();
   const progress = useSharedValue(focused ? 1 : 0);
+  const color = focused ? colors.primaryLight : colors.textMuted;
 
   useEffect(() => {
     progress.set(withSpring(focused ? 1 : 0, SPRING));
@@ -133,8 +128,37 @@ function TabItem({ label, focused, icon, color, onPress, onLongPress }: TabItemP
       style={styles.item}
       hitSlop={4}
     >
-      <Animated.View style={iconStyle}>{icon}</Animated.View>
+      <Animated.View style={iconStyle}>
+        {tabBarIcon?.({ focused, color, size: 22 })}
+      </Animated.View>
       <Text style={[styles.label, { color }, focused && styles.labelFocused]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+interface AddTabItemProps {
+  label: string;
+  icon: React.ReactNode;
+  onPress: () => void;
+  onLongPress: () => void;
+}
+
+function AddTabItem({ label, icon, onPress, onLongPress }: AddTabItemProps) {
+  const styles = useStyles();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={styles.item}
+      hitSlop={4}
+    >
+      <View style={styles.fab}>{icon}</View>
+      <Text style={styles.addLabel} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -156,17 +180,8 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
     borderRadius: radius.xl + 4,
     borderWidth: BAR_BORDER,
     borderColor: colors.borderSubtle,
+    overflow: 'visible',
     ...shadows.card,
-  },
-  pill: {
-    position: 'absolute',
-    top: PILL_INSET,
-    bottom: PILL_INSET,
-    left: PILL_INSET,
-    borderRadius: radius.lg,
-    backgroundColor: colors.primarySurface,
-    borderWidth: 1,
-    borderColor: colors.borderGlow,
   },
   item: {
     flex: 1,
@@ -181,5 +196,24 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
   },
   labelFocused: {
     fontWeight: '800',
+  },
+  fab: {
+    width: FAB_SIZE,
+    height: FAB_SIZE,
+    borderRadius: FAB_SIZE / 2,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -(FAB_SIZE / 2 + 8),
+    borderWidth: 4,
+    borderColor: colors.tabBar,
+    ...shadows.card,
+  },
+  addLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: -0.2,
+    marginTop: -2,
   },
 }));

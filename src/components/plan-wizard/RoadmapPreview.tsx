@@ -107,9 +107,15 @@ export function RoadmapPreview({ roadmap, isLoading, isError, errorMessage, onRe
 
       {tab === 'workouts' ? (
         <FlatList
-          data={trainingDays}
-          keyExtractor={(item) => String(item.day_number)}
-          renderItem={({ item }) => <WorkoutDayCard day={item} />}
+          data={buildWorkoutListItems(trainingDays)}
+          keyExtractor={(item) => (item.type === 'week' ? `week-${item.week}` : `day-${item.day.day_number}`)}
+          renderItem={({ item }) =>
+            item.type === 'week' ? (
+              <Text style={styles.weekHeader}>Week {item.week}</Text>
+            ) : (
+              <WorkoutDayCard day={item.day} />
+            )
+          }
           scrollEnabled={false}
           nestedScrollEnabled
           initialNumToRender={12}
@@ -146,6 +152,22 @@ export function RoadmapPreview({ roadmap, isLoading, isError, errorMessage, onRe
   );
 }
 
+type WorkoutListItem = { type: 'week'; week: number } | { type: 'day'; day: PlanDayRoadmap };
+
+function buildWorkoutListItems(trainingDays: PlanDayRoadmap[]): WorkoutListItem[] {
+  const items: WorkoutListItem[] = [];
+  let lastWeek = 0;
+  for (const day of trainingDays) {
+    const week = Math.ceil(day.day_number / 7);
+    if (week !== lastWeek) {
+      items.push({ type: 'week', week });
+      lastWeek = week;
+    }
+    items.push({ type: 'day', day });
+  }
+  return items;
+}
+
 function WorkoutDayCard({ day }: { day: PlanDayRoadmap }) {
   const styles = useStyles();
   return (
@@ -156,7 +178,10 @@ function WorkoutDayCard({ day }: { day: PlanDayRoadmap }) {
       </View>
       {(day.workout ?? []).map((ex, idx) => (
         <View key={idx} style={styles.exerciseRow}>
-          <Text style={styles.exerciseName}>{ex.exercise_name}</Text>
+          <View style={styles.exerciseNameRow}>
+            <Text style={styles.exerciseName}>{ex.exercise_name}</Text>
+            {ex.is_cardio ? <Badge label="Cardio" tone="amber" /> : null}
+          </View>
           <Text style={styles.exerciseMeta}>
             {ex.sets} × {ex.reps}
             {ex.rpe != null ? ` @RPE ${ex.rpe}` : ''} · rest {ex.rest_seconds}s
@@ -261,6 +286,15 @@ const useStyles = makeStyles(({ colors }) => {
       fontSize: 10,
       color: colors.textMuted,
     },
+    weekHeader: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: colors.textSecondary,
+      marginTop: spacing.md,
+      marginBottom: spacing.xs,
+      textTransform: 'uppercase',
+      letterSpacing: 0.4,
+    },
     emptyText: {
       fontSize: 13,
       color: colors.textMuted,
@@ -294,6 +328,11 @@ const useStyles = makeStyles(({ colors }) => {
       paddingVertical: spacing.xs,
       borderTopWidth: 1,
       borderTopColor: colors.border,
+    },
+    exerciseNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
     },
     exerciseName: {
       fontSize: 13,

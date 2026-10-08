@@ -83,25 +83,25 @@ export type Palette = typeof lightColors;
 export function shadowsFor(isDark: boolean) {
   return {
     card: {
-      shadowColor: '#000000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: isDark ? 0.3 : 0.08,
-      shadowRadius: 16,
-      elevation: 6,
+      shadowColor: isDark ? '#000000' : '#0F172A',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: isDark ? 0.35 : 0.05,
+      shadowRadius: 20,
+      elevation: 4,
     },
     elevated: {
-      shadowColor: '#000000',
+      shadowColor: isDark ? '#000000' : '#0F172A',
       shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: isDark ? 0.25 : 0.06,
+      shadowOpacity: isDark ? 0.25 : 0.04,
       shadowRadius: 10,
-      elevation: 3,
+      elevation: 2,
     },
     glow: {
       shadowColor: '#10B981',
       shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: isDark ? 0.35 : 0.25,
+      shadowOpacity: isDark ? 0.35 : 0.20,
       shadowRadius: 14,
-      elevation: 6,
+      elevation: 5,
     },
   };
 }
@@ -124,6 +124,19 @@ export const radius = {
   lg: 16,
   xl: 20,
   full: 9999,
+};
+
+export const motion = {
+  fast: 150,
+  normal: 250,
+  slow: 420,
+};
+
+export const breakpoints = {
+  compact: 360,
+  phone: 430,
+  tablet: 768,
+  desktop: 1024,
 };
 
 export const typography = {

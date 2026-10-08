@@ -7,6 +7,22 @@ export function toDateKey(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+export function todayDateKey(): string {
+  return toDateKey(new Date());
+}
+
+export function compareDateKeys(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+export function dateKeyToLocalDate(key: string): Date {
+  return parseDateKey(key);
+}
+
+export function formatDateKey(key: string, options: Intl.DateTimeFormatOptions): string {
+  return parseDateKey(key).toLocaleDateString('en-US', options);
+}
+
 export function getGreeting(date: Date = new Date()): string {
   const hour = date.getHours();
   if (hour < 5) return 'Late night grind';

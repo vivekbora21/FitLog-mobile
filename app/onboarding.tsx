@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -161,6 +161,26 @@ export default function OnboardingScreen() {
         sex: sex ?? 'MALE',
       }),
   });
+
+  // The "select" sub-step pre-highlights the goal-recommended mode's card before the user taps
+  // anything, so once its blueprint loads we need to wire up the matching slug/details ourselves —
+  // otherwise the card looks chosen but blueprintSlug stays null and "Next" silently no-ops.
+  useEffect(() => {
+    if (
+      step === 2 &&
+      planSubStep === 'select' &&
+      planPath === 'blueprint' &&
+      mode &&
+      !blueprintSlug &&
+      !skipPlan
+    ) {
+      const bp = blueprintsQuery.data?.blueprints.find((b) => b.mode === mode);
+      if (bp) {
+        setBlueprintSlug(bp.slug);
+        patchPlanDetails({ duration: String(bp.default_duration_days), daysPerWeek: bp.default_days_per_week });
+      }
+    }
+  }, [step, planSubStep, planPath, mode, blueprintSlug, skipPlan, blueprintsQuery.data]);
 
   const patchPlanDetails = (patch: Partial<WizardDetails>) => setPlanDetails((prev) => ({ ...prev, ...patch }));
 

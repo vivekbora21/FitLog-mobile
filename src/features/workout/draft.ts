@@ -1,5 +1,10 @@
 import type { RoutineExercise, WorkoutSession, WorkoutSet } from '../../types';
 import { kv } from '../../lib/kv';
+import {
+  getRoutineExerciseDisplayName,
+  getRoutineExerciseMuscle,
+  getRoutineExerciseId,
+} from '../../lib/workout';
 
 export type SetType = WorkoutSet['set_type'];
 
@@ -9,6 +14,10 @@ export interface DraftSet {
   weight: string;
   reps: string;
   done: boolean;
+  /** Perceived effort 1–10 (Rate of Perceived Exertion). Recorded after completing the set. */
+  rpe?: string;
+  /** Reps in Reserve (RIR). Inverse of RPE — 0 means failure, 3 means 3 reps left. */
+  rir?: string;
   // Cardio fields
   durationMinutes?: string;
   incline?: string;
@@ -32,6 +41,12 @@ export interface DraftExercise {
   notes?: string;
   /** Metabolic Equivalent of Task, used to suggest calories burned from duration. */
   metValue?: number | null;
+  /** Instructions from the exercise catalog — shown in the guide sheet. */
+  instructions?: string;
+  /** YouTube / video URL for form guidance. */
+  videoUrl?: string | null;
+  /** Target RPE from the routine prescription. */
+  targetRpe?: number | null;
 }
 
 /** An in-progress new workout, saved on every change so a crash or kill never loses it. */
@@ -79,6 +94,8 @@ export const newSet = (
   weight,
   reps,
   done: false,
+  rpe: '',
+  rir: '',
   durationMinutes: cardio?.durationMinutes ?? '',
   incline: cardio?.incline ?? '',
   speedKmh: cardio?.speedKmh ?? '',
@@ -201,8 +218,9 @@ function firstRepNumber(targetReps?: string): string {
 }
 
 export function exerciseFromRoutine(ex: RoutineExercise): DraftExercise {
-  const exName = ex.swap?.exercise_name ?? ex.exercise_name;
-  const exMuscle = ex.swap ? ex.swap.primary_muscle ?? undefined : ex.primary_muscle;
+  const exName = getRoutineExerciseDisplayName(ex);
+  const exMuscle = getRoutineExerciseMuscle(ex) || undefined;
+  const exId = getRoutineExerciseId(ex);
   const exMetValue = ex.swap ? ex.swap.met_value : ex.met_value;
   const isCardio = isCardioExercise(exName, exMuscle);
 
@@ -225,7 +243,7 @@ export function exerciseFromRoutine(ex: RoutineExercise): DraftExercise {
 
     return {
       key: nextKey(),
-      exerciseId: ex.swap?.exercise ?? ex.exercise,
+      exerciseId: exId,
       name: exName,
       muscle: exMuscle,
       restSeconds: ex.rest_seconds || 0,
@@ -241,13 +259,14 @@ export function exerciseFromRoutine(ex: RoutineExercise): DraftExercise {
   const reps = firstRepNumber(ex.target_reps);
   return {
     key: nextKey(),
-    exerciseId: ex.swap?.exercise ?? ex.exercise,
+    exerciseId: exId,
     name: exName,
     muscle: exMuscle,
     restSeconds: ex.rest_seconds || 90,
     isCardio: false,
     notes: ex.notes,
     metValue: exMetValue,
+    targetRpe: ex.target_rpe ?? null,
     sets: Array.from({ length: Math.max(1, ex.target_sets || 1) }, () => newSet(weight ? String(weight) : '', reps)),
   };
 }
@@ -276,6 +295,8 @@ export function exercisesFromSession(session: WorkoutSession): DraftExercise[] {
         heartRate: s.heart_rate ? String(s.heart_rate) : '',
         distanceKm: s.distance_km ? String(s.distance_km) : '',
         calories: s.calories ? String(s.calories) : '',
+        rpe: s.rpe !== null && s.rpe !== undefined ? String(s.rpe) : '',
+        rir: '',
         done: s.completed,
       })),
     };

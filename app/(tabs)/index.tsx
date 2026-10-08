@@ -17,12 +17,9 @@ import {
   Flame,
   Dumbbell,
   Trophy,
-  Sparkles,
   Droplet,
   Footprints,
   ChevronRight,
-  Target,
-  Scale,
   Check,
   Plus,
   ClipboardCheck,
@@ -31,7 +28,6 @@ import { useAuth } from '../../src/providers/auth';
 import { api, extractErrorMessage } from '../../src/api/client';
 import {
   Card,
-  Badge,
   MetricCard,
   Avatar,
   ProgressBar,
@@ -47,10 +43,11 @@ import {
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { formatNumber, calculateMacroPercentage } from '../../src/types';
-import { formatVolume, getGreeting, getLastSevenDays, toDateKey } from '../../src/lib/format';
+import { getGreeting, getLastSevenDays, toDateKey } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
 import { ResumeWorkoutBanner } from '../../src/features/workout/ResumeWorkoutBanner';
 import { invalidateTrackingData } from '../../src/lib/queries';
+import { getRoutineExerciseDisplayName } from '../../src/lib/workout';
 
 const enter = (i: number) => FadeInDown.delay(80 + i * 70).duration(450);
 
@@ -127,7 +124,6 @@ export default function DashboardScreen() {
   const nutrition = stats?.nutrition;
   const journey = stats?.journey;
   const dailyLog = stats?.daily_log;
-  const pacing = stats?.journey_pacing;
   const prs = stats?.recent_prs || [];
   const heatmap = stats?.activity_heatmap || {};
 
@@ -176,14 +172,6 @@ export default function DashboardScreen() {
 
   const workoutsThisWeek = stats?.workouts_this_week ?? 0;
   const weeklyTarget = stats?.weekly_workouts_target ?? journey?.weekly_workouts_target ?? 4;
-
-  const programDay = pacing?.current_day || journey?.program_day;
-  const programLength = pacing?.duration_days || journey?.program_length || 60;
-  const programPct =
-    journey?.program_completion_percent ??
-    (programDay ? Math.round((programDay / programLength) * 100) : 0);
-  const insight = journey?.copilot_insight || pacing?.copilot_insight;
-  const targetWeight = journey?.target_weight || pacing?.target_weight;
 
   const displayName = user?.first_name || user?.username || 'Athlete';
 
@@ -257,6 +245,11 @@ export default function DashboardScreen() {
             icon={<ClipboardCheck size={18} color={colors.amber} />}
             label="Check-in"
             onPress={() => router.push('/checkin')}
+          />
+          <QuickAction
+            icon={<Droplet size={18} color={colors.blue} />}
+            label="Log water"
+            onPress={() => waterMutation.mutate(waterMl + 250)}
           />
         </Animated.View>
 
@@ -386,15 +379,30 @@ export default function DashboardScreen() {
               </View>
             </View>
 
-            {routineDetails?.exercises && exerciseCount > 0 && !isWorkoutDone && (
+            {routineDetails?.exercises && exerciseCount > 0 && (
               <View style={styles.chipRow}>
-                {routineDetails.exercises.slice(0, 3).map((ex, idx) => (
-                  <View key={ex.id || idx} style={styles.exerciseChip}>
-                    <Text style={styles.exerciseChipText} numberOfLines={1}>
-                      {ex.exercise_name}
-                    </Text>
-                  </View>
-                ))}
+                {routineDetails.exercises.slice(0, 3).map((ex, idx) => {
+                  const displayName = getRoutineExerciseDisplayName(ex);
+                  const isSwapped = !!ex.swap;
+                  return (
+                    <View
+                      key={ex.id || idx}
+                      style={[styles.exerciseChip, isWorkoutDone && styles.exerciseChipDone]}
+                    >
+                      <Text
+                        style={[styles.exerciseChipText, isWorkoutDone && styles.exerciseChipTextDone]}
+                        numberOfLines={1}
+                      >
+                        {displayName}
+                      </Text>
+                      {isSwapped && (
+                        <View style={styles.swappedBadge}>
+                          <Text style={styles.swappedBadgeText}>Swapped</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
                 {exerciseCount > 3 && (
                   <View style={[styles.exerciseChip, styles.exerciseChipMore]}>
                     <Text style={styles.exerciseChipMoreText}>+{exerciseCount - 3}</Text>
@@ -449,78 +457,6 @@ export default function DashboardScreen() {
             accessibilityHint="Opens the daily check-in to log steps and sleep"
             footer={<Text style={styles.metricFooterHint}>Tap to log steps & sleep</Text>}
           />
-        </Animated.View>
-
-        {/* Journey */}
-        <Animated.View entering={enter(4)}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitleInline}>Your journey</Text>
-            <PressableScale haptic="selection" onPress={() => router.push('/progress')}>
-              <Text style={styles.sectionAction}>Analytics &amp; charts →</Text>
-            </PressableScale>
-          </View>
-          <Card
-            elevated
-            highlighted
-            style={styles.journeyCard}
-            onPress={() => router.push('/progress')}
-            accessibilityHint="Opens full progress and analytics"
-          >
-            <View style={styles.badgeRow}>
-              <Badge label={journey?.mode_label || pacing?.mode_label || 'Training'} tone="emerald" />
-              {pacing?.pacing_status && pacing.pacing_status !== 'NO_PROGRAM' && (
-                <Badge
-                  label={pacing.pacing_status.replace(/_/g, ' ')}
-                  tone={pacing.pacing_status === 'ON_TRACK' ? 'cyan' : 'amber'}
-                />
-              )}
-            </View>
-            <Text style={styles.journeyTitle}>{pacing?.program_name || 'Current training cycle'}</Text>
-
-            {programDay ? (
-              <View style={styles.programProgress}>
-                <View style={styles.programProgressText}>
-                  <Text style={styles.journeyDayText}>
-                    Day {programDay} of {programLength}
-                  </Text>
-                  <Text style={styles.programPct}>{Math.min(100, programPct)}%</Text>
-                </View>
-                <ProgressBar percentage={programPct} height={8} delay={650} />
-              </View>
-            ) : null}
-
-            {insight ? (
-              <View style={styles.insightBox}>
-                <Sparkles size={16} color={colors.primaryLight} />
-                <Text style={styles.insightText}>{insight}</Text>
-              </View>
-            ) : null}
-
-            <View style={styles.journeyMetricsRow}>
-              <JourneyStat
-                icon={<Scale size={14} color={colors.textSecondary} />}
-                label="Current"
-                value={journey?.current_weight ? `${journey.current_weight} kg` : '--'}
-              />
-              <View style={styles.metricDivider} />
-              <JourneyStat
-                icon={<Target size={14} color={colors.textSecondary} />}
-                label="Target"
-                value={targetWeight ? `${targetWeight} kg` : '--'}
-              />
-              <View style={styles.metricDivider} />
-              <JourneyStat
-                icon={<Dumbbell size={14} color={colors.textSecondary} />}
-                label="Volume/wk"
-                value={formatVolume(stats?.total_volume_kg_week)}
-              />
-            </View>
-
-            <View style={styles.journeyFooter}>
-              <Text style={styles.journeyFooterText}>View progress &amp; analytics</Text>
-              <ChevronRight size={14} color={colors.primaryLight} />
-            </View>
-          </Card>
         </Animated.View>
 
         {/* PRs */}
@@ -627,27 +563,15 @@ function QuickAction({ icon, label, onPress }: { icon: React.ReactNode; label: s
   );
 }
 
-function JourneyStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  const styles = useStyles();
-  return (
-    <View style={styles.journeyMetricItem}>
-      <View style={styles.journeyStatLabelRow}>
-        {icon}
-        <Text style={styles.metricItemLabel}>{label}</Text>
-      </View>
-      <Text style={styles.metricItemValue}>{value}</Text>
-    </View>
-  );
-}
-
 const useStyles = makeStyles(({ colors }) => ({
   quickRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
   quickAction: {
-    flex: 1,
+    width: '23%',
     alignItems: 'center',
     gap: 6,
     paddingVertical: spacing.md,
@@ -953,12 +877,33 @@ const useStyles = makeStyles(({ colors }) => ({
     borderRadius: radius.full,
     paddingVertical: 5,
     paddingHorizontal: spacing.md,
-    maxWidth: '60%',
+    maxWidth: '65%',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  exerciseChipDone: {
+    borderColor: colors.primaryGlow,
+    backgroundColor: colors.primarySurface,
   },
   exerciseChipText: {
     fontSize: 12,
     color: colors.textPrimary,
     fontWeight: '600',
+  },
+  exerciseChipTextDone: {
+    color: colors.primaryLight,
+  },
+  swappedBadge: {
+    marginLeft: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: radius.sm,
+    backgroundColor: colors.amberGlow,
+  },
+  swappedBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.amber,
   },
   exerciseChipMore: {
     backgroundColor: colors.primarySurface,
@@ -972,105 +917,6 @@ const useStyles = makeStyles(({ colors }) => ({
   metricsGrid: {
     flexDirection: 'row',
     gap: spacing.md,
-  },
-  journeyCard: {
-    padding: spacing.lg,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  journeyTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  programProgress: {
-    marginTop: spacing.md,
-    gap: spacing.xs + 2,
-  },
-  programProgressText: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  journeyDayText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  programPct: {
-    fontSize: 13,
-    color: colors.primaryLight,
-    fontWeight: '800',
-  },
-  insightBox: {
-    flexDirection: 'row',
-    backgroundColor: colors.primarySurface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderGlow,
-    padding: spacing.md,
-    marginTop: spacing.md,
-    gap: spacing.sm,
-    alignItems: 'flex-start',
-  },
-  insightText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.textPrimary,
-    lineHeight: 19,
-    fontWeight: '500',
-  },
-  journeyMetricsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    marginTop: spacing.lg,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  journeyMetricItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  journeyStatLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
-  },
-  metricItemLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    fontWeight: '600',
-  },
-  metricItemValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  metricDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: colors.border,
-  },
-  journeyFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderSubtle,
-  },
-  journeyFooterText: {
-    fontSize: 12,
-    color: colors.primaryLight,
-    fontWeight: '600',
   },
   prScrollOuter: {
     marginHorizontal: -spacing.lg,

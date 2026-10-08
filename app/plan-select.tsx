@@ -56,6 +56,28 @@ export default function PlanSelectScreen() {
 
   const patchDetails = (patch: Partial<WizardDetails>) => setDetails((prev) => ({ ...prev, ...patch }));
 
+  const safeBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  };
+
+  useEffect(() => {
+    if (!profile) return;
+    setDetails((prev) => ({
+      ...prev,
+      currentWeight: prev.currentWeight || (profile.weight_kg != null ? String(profile.weight_kg) : prev.currentWeight),
+      height: prev.height || (profile.height_cm != null ? String(profile.height_cm) : prev.height),
+      age: prev.age || (() => {
+        const a = calculateAge(profile.date_of_birth);
+        return a != null ? String(a) : prev.age;
+      })(),
+      sex: prev.sex || ((profile.sex as 'MALE' | 'FEMALE') || prev.sex),
+    }));
+  }, [profile]);
+
   const blueprintsQuery = useQuery({
     queryKey: ['blueprints'],
     queryFn: () => api.getBlueprints(),
@@ -100,7 +122,7 @@ export default function PlanSelectScreen() {
     onSuccess: async () => {
       haptics.success();
       await Promise.all([queryClient.invalidateQueries(), refreshUser()]);
-      router.back();
+      safeBack();
     },
     onError: (err) => {
       haptics.error();
@@ -126,7 +148,7 @@ export default function PlanSelectScreen() {
   const goBackStep = () => {
     haptics.selection();
     if (step === 0) {
-      router.back();
+      safeBack();
       return;
     }
     setStep((s) => Math.max(0, s - 1));
@@ -240,7 +262,7 @@ export default function PlanSelectScreen() {
     );
 
   return (
-    <SheetScreen title="Build your plan" subtitle={`Step ${step + 1} of ${STEP_COUNT}`} onClose={() => router.back()} footer={footer}>
+    <SheetScreen title="Build your plan" subtitle={`Step ${step + 1} of ${STEP_COUNT}`} onClose={safeBack} footer={footer}>
       <ProgressBar percentage={((step + 1) / STEP_COUNT) * 100} style={styles.progress} />
 
       {step === 0 ? (

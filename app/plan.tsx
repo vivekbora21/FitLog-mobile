@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,9 +31,11 @@ import {
   SnapStatusButton,
 } from '../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../src/theme';
-import { getProgramDayDate, toDateKey } from '../src/lib/format';
+import { formatDateKey } from '../src/lib/format';
 import { haptics } from '../src/lib/haptics';
+import { invalidateWorkoutData } from '../src/lib/queries';
 import type { RoutineExercise } from '../src/types';
+import { getRoutineExerciseDisplayName } from '../src/lib/workout';
 
 const DAY_CHIP_WIDTH = 58;
 const DAY_CHIP_HEIGHT = 52;
@@ -71,6 +73,7 @@ export default function PlanScreen() {
   const day = days.find((d) => d.day_number === shownDay);
   const routine = day?.routine_details;
   const exercises = routine?.exercises ?? [];
+  const payloadExercises = exercises.length === 0 ? (day?.workout_payload ?? []) : [];
   const completed = days.filter((d) => d.status === 'COMPLETED').length;
   const duration = program?.duration_days ?? days.length;
 
@@ -79,7 +82,7 @@ export default function PlanScreen() {
       api.updateProgramDay({ day_number: shownDay, status: newStatus }),
     onSuccess: () => {
       haptics.success();
-      queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
+      invalidateWorkoutData(queryClient);
       queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
     },
@@ -98,7 +101,7 @@ export default function PlanScreen() {
       api.swapExercise(payload),
     onSuccess: () => {
       haptics.success();
-      queryClient.invalidateQueries({ queryKey: ['workoutPlan'] });
+      invalidateWorkoutData(queryClient);
       queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] });
       setSwapTarget(null);
     },
@@ -108,23 +111,19 @@ export default function PlanScreen() {
     },
   });
 
-  const programStartDate = program?.start_date ?? null;
-  const planDayDate = useMemo(() => {
-    if (!programStartDate) return null;
-    const parts = programStartDate.split('-');
-    if (parts.length !== 3) return null;
-    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    d.setDate(d.getDate() + (shownDay - 1));
-    return toDateKey(d);
-  }, [programStartDate, shownDay]);
+  const planDayDate = day?.calendar_date ?? null;
 
-  const selectedDayDate = useMemo(() => {
-    return getProgramDayDate(program?.start_date, shownDay);
-  }, [program?.start_date, shownDay]);
+  const selectedDayDate = day?.calendar_date
+    ? {
+        formattedShort: formatDateKey(day.calendar_date, { day: 'numeric', month: 'short' }),
+        formattedFull: formatDateKey(day.calendar_date, { weekday: 'short', day: 'numeric', month: 'short' }),
+      }
+    : null;
 
-  const currentDayDate = useMemo(() => {
-    return getProgramDayDate(program?.start_date, currentDay);
-  }, [program?.start_date, currentDay]);
+  const currentDayEntry = days.find((item) => item.day_number === currentDay);
+  const currentDayDate = currentDayEntry?.calendar_date
+    ? { formattedShort: formatDateKey(currentDayEntry.calendar_date, { day: 'numeric', month: 'short' }) }
+    : null;
 
   // Keep the selected day visible in the strip.
   const stripRef = useRef<ScrollView>(null);
@@ -257,7 +256,7 @@ export default function PlanScreen() {
                   const isRest = d.status === 'REST';
                   const isMissed = d.status === 'MISSED';
                   const isToday = d.day_number === currentDay;
-                  const dayDate = getProgramDayDate(program?.start_date, d.day_number);
+                  const dayDate = d.calendar_date ? { formattedShort: formatDateKey(d.calendar_date, { day: 'numeric', month: 'short' }), formattedFull: formatDateKey(d.calendar_date, { weekday: 'short', day: 'numeric', month: 'short' }) } : null;
 
                   return (
                     <PressableScale
@@ -359,7 +358,7 @@ export default function PlanScreen() {
 
                 {exercises.map((ex, i) => {
                   const load = plannedLoad(ex);
-                  const displayName = ex.swap?.exercise_name || ex.exercise_name;
+                  const displayName = getRoutineExerciseDisplayName(ex);
                   const isSwapped = !!ex.swap;
                   return (
                     <View key={ex.id} style={[styles.exRow, i > 0 && styles.exRowBorder]}>
@@ -413,6 +412,26 @@ export default function PlanScreen() {
                     </View>
                   );
                 })}
+
+                {payloadExercises.map((ex, i) => (
+                  <View key={i} style={[styles.exRow, i > 0 && styles.exRowBorder]}>
+                    <View style={styles.exIndex}>
+                      <Text style={styles.exIndexText}>{i + 1}</Text>
+                    </View>
+                    <View style={styles.exBody}>
+                      <View style={styles.exNameRow}>
+                        <Text style={styles.exName}>{ex.exercise_name}</Text>
+                        {ex.is_cardio ? <Badge label="Cardio" tone="amber" /> : null}
+                      </View>
+                      <View style={styles.exStats}>
+                        <Stat label="Sets" value={`${ex.sets} × ${ex.reps}`} />
+                        <Stat label="Rest" value={`${ex.rest_seconds}s`} />
+                        <Stat label="RPE" value={ex.rpe != null ? String(ex.rpe) : '--'} />
+                      </View>
+                      {ex.progression_rule ? <Text style={styles.exNote}>{ex.progression_rule}</Text> : null}
+                    </View>
+                  </View>
+                ))}
 
                 {/* 1-tap quick status selector */}
                 <View style={styles.statusRow}>
@@ -483,6 +502,7 @@ export default function PlanScreen() {
                         params: {
                           plan: '1',
                           routineId: routine?.id,
+                          dayNumber: String(shownDay),
                           date: planDayDate || undefined,
                         },
                       })

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Tabs, useRouter } from 'expo-router';
-import { LayoutDashboard, Dumbbell, Utensils, TrendingUp, User } from 'lucide-react-native';
+import { LayoutDashboard, Dumbbell, Utensils, TrendingUp, User, Plus } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { TabBar } from '../../src/components/navigation/TabBar';
 import { useTheme } from '../../src/theme';
@@ -56,6 +56,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="add"
+        options={{
+          title: 'Add',
+          tabBarIcon: ({ color, size }) => <Plus size={size} color={color} strokeWidth={2.6} />,
+        }}
+      />
+      <Tabs.Screen
         name="nutrition"
         options={{
           title: 'Nutrition',
@@ -77,6 +84,7 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: 'Profile',
+          href: null,
           tabBarIcon: ({ color, size, focused }) => (
             <User size={size} color={color} strokeWidth={focused ? 2.4 : 2} />
           ),

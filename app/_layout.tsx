@@ -1,7 +1,7 @@
 import React from 'react';
 import '../src/lib/alertPolyfill';
 import { StatusBar } from 'expo-status-bar';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { QueryClient, QueryClientProvider, focusManager, onlineManager } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
 import { addNetworkStateListener } from 'expo-network';
@@ -21,18 +21,18 @@ const queryClient = new QueryClient({
   },
 });
 
-// Pause queries while offline and refetch the moment the connection returns.
-onlineManager.setEventListener((setOnline) => {
-  const subscription = addNetworkStateListener((state) => setOnline(state.isConnected !== false));
-  return () => subscription.remove();
-});
+// Pause queries while offline and refetch the moment the connection returns on native platforms.
+if (Platform.OS !== 'web') {
+  onlineManager.setEventListener((setOnline) => {
+    const subscription = addNetworkStateListener((state) => setOnline(state.isConnected !== false));
+    return () => subscription.remove();
+  });
 
-// Refetch stale queries whenever the app returns to the foreground, so screens like the
-// Workouts tab and Workout Plan don't keep showing data cached from before a status
-// change made elsewhere in the app.
-AppState.addEventListener('change', (state) => {
-  focusManager.setFocused(state === 'active');
-});
+  // Refetch stale queries whenever the app returns to the foreground on native platforms.
+  AppState.addEventListener('change', (state) => {
+    focusManager.setFocused(state === 'active');
+  });
+}
 
 const modal = { presentation: 'modal', animation: 'slide_from_bottom' } as const;
 
@@ -56,6 +56,7 @@ function RootNavigator() {
         <Stack.Screen name="checkin" options={modal} />
         {/* A live workout must not be swiped away by accident; closing goes through the draft prompt. */}
         <Stack.Screen name="workout/log" options={{ ...modal, gestureEnabled: false }} />
+        <Stack.Screen name="workout/complete" options={{ ...modal, gestureEnabled: false }} />
         <Stack.Screen name="workout/[id]" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="profile-edit" options={modal} />
         <Stack.Screen name="account/password" options={modal} />

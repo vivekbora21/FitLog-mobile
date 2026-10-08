@@ -23,3 +23,20 @@ export function invalidateTrackingData(queryClient: QueryClient) {
     )
   );
 }
+
+export async function invalidateWorkoutData(queryClient: QueryClient, dateKey?: string) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['workoutPlan'] }),
+    queryClient.invalidateQueries({ queryKey: ['todaysWorkout'] }),
+    queryClient.invalidateQueries({ queryKey: ['workoutDay'] }),
+    queryClient.invalidateQueries({ queryKey: ['workoutSessions'] }),
+    queryClient.invalidateQueries({ queryKey: ['dashboardStats'] }),
+    queryClient.invalidateQueries({ queryKey: ['calendarDayStatus'] }),
+  ]);
+  if (dateKey) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['nutritionDay', dateKey] }),
+      queryClient.invalidateQueries({ queryKey: ['dailyLog', dateKey] }),
+    ]);
+  }
+}

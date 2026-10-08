@@ -308,25 +308,40 @@ function CardioSvgChart({ entries }: { entries: CardioEntry[] }) {
           );
         })}
 
-        <SvgText
-          x={paddingHoriz}
-          y={chartHeight - 10}
-          fill={colors.textMuted}
-          fontSize="10"
-          fontWeight="600"
-        >
-          {entries[0]?.date.slice(5)}
-        </SvgText>
-        <SvgText
-          x={layoutWidth - paddingHoriz}
-          y={chartHeight - 10}
-          fill={colors.textMuted}
-          fontSize="10"
-          fontWeight="600"
-          textAnchor="end"
-        >
-          {entries[entries.length - 1]?.date.slice(5)}
-        </SvgText>
+        {entries.length === 1 ? (
+          <SvgText
+            x={layoutWidth / 2}
+            y={chartHeight - 10}
+            fill={colors.textMuted}
+            fontSize="10"
+            fontWeight="600"
+            textAnchor="middle"
+          >
+            {entries[0]?.date ? entries[0].date.slice(5) : ''}
+          </SvgText>
+        ) : entries.length > 1 ? (
+          <>
+            <SvgText
+              x={paddingHoriz}
+              y={chartHeight - 10}
+              fill={colors.textMuted}
+              fontSize="10"
+              fontWeight="600"
+            >
+              {entries[0]?.date ? entries[0].date.slice(5) : ''}
+            </SvgText>
+            <SvgText
+              x={layoutWidth - paddingHoriz}
+              y={chartHeight - 10}
+              fill={colors.textMuted}
+              fontSize="10"
+              fontWeight="600"
+              textAnchor="end"
+            >
+              {entries[entries.length - 1]?.date ? entries[entries.length - 1].date.slice(5) : ''}
+            </SvgText>
+          </>
+        ) : null}
         <SvgText
           x={layoutWidth - paddingHoriz + 2}
           y={paddingTop + 4}

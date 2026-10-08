@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -24,6 +24,8 @@ import {
   Trash2,
   User as UserIcon,
 } from 'lucide-react-native';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../../src/api/client';
 import { useAuth } from '../../src/providers/auth';
 import { Avatar, Badge, Button, PressableScale, ProgressRing, ScreenHeader } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
@@ -72,7 +74,22 @@ export default function ProfileScreen() {
   const name = user?.full_name || user?.username || 'User';
   const age = calculateAge(profile?.date_of_birth);
   const dobFormatted = formatDobDisplay(profile?.date_of_birth);
-  const bmi = calculateBMI(profile?.weight_kg, profile?.height_cm);
+
+  // Reuses the ['weights'] cache the Progress screen populates, so a weigh-in
+  // logged there is reflected here immediately instead of the profile's own
+  // weight_kg field, which only updates from the daily check-in / profile-edit
+  // flows and otherwise goes stale as soon as a newer weigh-in is recorded.
+  const { data: weights = [] } = useQuery({
+    queryKey: ['weights'],
+    queryFn: () => api.getWeights(),
+  });
+  const latestWeighIn = useMemo(() => {
+    if (weights.length === 0) return null;
+    return weights.reduce((latest, w) => (w.date > latest.date ? w : latest), weights[0]);
+  }, [weights]);
+  const displayWeightKg = latestWeighIn?.weight_kg ?? profile?.weight_kg ?? null;
+
+  const bmi = calculateBMI(displayWeightKg, profile?.height_cm);
   const bmiCategory = bmi != null ? getBMICategory(bmi) : null;
 
   return (
@@ -120,7 +137,7 @@ export default function ProfileScreen() {
             <ProfileStat
               icon={<Scale size={16} color={colors.primaryLight} />}
               label="Weight"
-              value={profile?.weight_kg ? `${profile.weight_kg} kg` : '--'}
+              value={displayWeightKg ? `${displayWeightKg} kg` : '--'}
             />
             <ProfileStat
               icon={<Ruler size={16} color={colors.cyan} />}

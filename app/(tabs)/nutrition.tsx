@@ -20,6 +20,10 @@ import {
   Dumbbell,
   ShieldCheck,
   TrendingUp,
+  Zap,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { api, extractErrorMessage } from '../../src/api/client';
@@ -33,6 +37,7 @@ import {
   DateNavigator,
   EmptyState,
   ErrorState,
+  Input,
   PressableScale,
   ProgressBar,
   ProgressRing,
@@ -88,6 +93,8 @@ export default function NutritionScreen() {
 
   const [historyDaysCount, setHistoryDaysCount] = useState(5);
   const [viewMode, setViewMode] = useState<'DAILY' | 'WEEKLY'>('DAILY');
+  const [isEditingWater, setIsEditingWater] = useState(false);
+  const [customWaterInput, setCustomWaterInput] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
 
   const queryKey = ['nutritionDay', date];
@@ -194,8 +201,15 @@ export default function NutritionScreen() {
     await Promise.all([refetch(), refetchHistory()]);
   };
 
-  const openAddMeal = (mealType?: MealEntry['meal_type'], targetDate?: string) =>
-    router.push({ pathname: '/meal/add', params: { date: targetDate || date, ...(mealType ? { type: mealType } : {}) } });
+  const openAddMeal = (mealType?: MealEntry['meal_type'], targetDate?: string, mode?: string) =>
+    router.push({
+      pathname: '/meal/add',
+      params: {
+        date: targetDate || date,
+        ...(mealType ? { type: mealType } : {}),
+        ...(mode ? { mode } : {}),
+      },
+    });
 
   const openMeal = (meal: MealEntry) => router.push({ pathname: '/meal/[id]', params: { id: meal.id, date } });
 
@@ -272,7 +286,8 @@ export default function NutritionScreen() {
   }
 
   const caloriesConsumed = day?.total_calories || 0;
-  const caloriesTarget = targets?.daily_calories || 2200;
+  const exerciseCalories = targets?.exercise_calories || 0;
+  const caloriesTarget = (targets?.daily_calories || 2200) + exerciseCalories;
   const calPct = calculateMacroPercentage(caloriesConsumed, caloriesTarget);
   const caloriesLeft = caloriesTarget - caloriesConsumed;
 
@@ -543,6 +558,8 @@ export default function NutritionScreen() {
                 value: formatNumber(caloriesTarget),
                 unit: 'kcal',
                 icon: <ShieldCheck size={11} color={colors.cyan} />,
+                badgeText: exerciseCalories > 0 ? `+${formatNumber(exerciseCalories)} earned` : undefined,
+                badgeTone: exerciseCalories > 0 ? 'rose' : undefined,
               },
               {
                 label: isBulk ? (caloriesConsumed >= caloriesTarget ? 'Surplus' : 'Remaining') : isCut ? 'Deficit' : 'Balance',
@@ -601,10 +618,21 @@ export default function NutritionScreen() {
                 <Text style={styles.waterTitle}>Hydration</Text>
               </View>
               <View style={styles.waterAmountRow}>
-                <Text style={styles.waterAmount}>
-                  {(waterMl / 1000).toFixed(2)}
-                  <Text style={styles.waterAmountTarget}> / {(waterTargetMl / 1000).toFixed(1)} L</Text>
-                </Text>
+                <PressableScale
+                  haptic="selection"
+                  onPress={() => {
+                    setCustomWaterInput(String(waterMl));
+                    setIsEditingWater((prev) => !prev);
+                  }}
+                  style={styles.waterAmountBtn}
+                  accessibilityLabel="Tap to set exact water amount"
+                >
+                  <Text style={styles.waterAmount}>
+                    {(waterMl / 1000).toFixed(2)}
+                    <Text style={styles.waterAmountTarget}> / {(waterTargetMl / 1000).toFixed(1)} L</Text>
+                  </Text>
+                  <Pencil size={12} color={colors.textMuted} />
+                </PressableScale>
                 <ProgressRing
                   percentage={Math.min(100, Math.round((waterMl / Math.max(1, waterTargetMl)) * 100))}
                   size={32}
@@ -614,6 +642,101 @@ export default function NutritionScreen() {
                 />
               </View>
             </View>
+
+            {isEditingWater && (
+              <Animated.View entering={FadeInDown.duration(160)} style={styles.waterCustomRow}>
+                <Input
+                  label="Exact Water (ml)"
+                  keyboardType="number-pad"
+                  placeholder="e.g. 2000"
+                  value={customWaterInput}
+                  onChangeText={(t) => setCustomWaterInput(t.replace(/[^0-9]/g, ''))}
+                  containerStyle={styles.waterCustomInput}
+                  autoFocus
+                />
+                <PressableScale
+                  haptic="medium"
+                  onPress={() => {
+                    const parsed = parseInt(customWaterInput, 10);
+                    if (!isNaN(parsed) && parsed >= 0) {
+                      waterMutation.mutate(parsed);
+                    }
+                    setIsEditingWater(false);
+                  }}
+                  style={styles.waterSaveBtn}
+                  accessibilityLabel="Save exact water amount"
+                >
+                  <Check size={16} color="#FFFFFF" strokeWidth={3} />
+                </PressableScale>
+                <PressableScale
+                  haptic="selection"
+                  onPress={() => setIsEditingWater(false)}
+                  style={styles.waterCancelBtn}
+                  accessibilityLabel="Cancel editing water"
+                >
+                  <X size={16} color={colors.textSecondary} />
+                </PressableScale>
+              </Animated.View>
+            )}
+
+            {/* Quick Bottle Presets */}
+            <View style={styles.waterPresetsRow}>
+              <PressableScale
+                haptic="selection"
+                onPress={() => waterMutation.mutate(waterMl + 250)}
+                style={styles.waterPresetChip}
+                accessibilityLabel="Add 250ml cup"
+              >
+                <Text style={styles.waterPresetPlus}>+</Text>
+                <Text style={styles.waterPresetAmount}>250ml</Text>
+                <Text style={styles.waterPresetLabel}>Cup</Text>
+              </PressableScale>
+
+              <PressableScale
+                haptic="selection"
+                onPress={() => waterMutation.mutate(waterMl + 500)}
+                style={[styles.waterPresetChip, styles.waterPresetHighlight]}
+                accessibilityLabel="Add 500ml shaker"
+              >
+                <Text style={[styles.waterPresetPlus, { color: colors.blue }]}>+</Text>
+                <Text style={[styles.waterPresetAmount, { color: colors.blue }]}>500ml</Text>
+                <Text style={styles.waterPresetLabel}>Shaker</Text>
+              </PressableScale>
+
+              <PressableScale
+                haptic="selection"
+                onPress={() => waterMutation.mutate(waterMl + 750)}
+                style={styles.waterPresetChip}
+                accessibilityLabel="Add 750ml bottle"
+              >
+                <Text style={styles.waterPresetPlus}>+</Text>
+                <Text style={styles.waterPresetAmount}>750ml</Text>
+                <Text style={styles.waterPresetLabel}>Bottle</Text>
+              </PressableScale>
+
+              <PressableScale
+                haptic="selection"
+                onPress={() => waterMutation.mutate(waterMl + 1000)}
+                style={styles.waterPresetChip}
+                accessibilityLabel="Add 1000ml flask"
+              >
+                <Text style={styles.waterPresetPlus}>+</Text>
+                <Text style={styles.waterPresetAmount}>1000ml</Text>
+                <Text style={styles.waterPresetLabel}>Flask</Text>
+              </PressableScale>
+
+              {waterMl > 0 && (
+                <PressableScale
+                  haptic="selection"
+                  onPress={() => waterMutation.mutate(Math.max(0, waterMl - 250))}
+                  style={[styles.waterPresetChip, styles.waterPresetUndo]}
+                  accessibilityLabel="Undo 250ml"
+                >
+                  <Text style={styles.waterPresetUndoText}>−250ml</Text>
+                </PressableScale>
+              )}
+            </View>
+
             <View style={styles.waterControls}>
               <Text style={styles.waterHint}>
                 {waterCups} of {waterTargetCups} cups · {CUP_ML} ml each
@@ -642,9 +765,20 @@ export default function NutritionScreen() {
         <Animated.View entering={enter(3)}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>{isToday ? "Today's meals" : `Meals · ${dayLabel}`}</Text>
-            {mealGroups.length > 0 && (
-              <Text style={styles.sectionMeta}>{day?.meals?.length ?? 0} entries</Text>
-            )}
+            <View style={styles.sectionHeaderRight}>
+              {mealGroups.length > 0 && (
+                <Text style={styles.sectionMeta}>{day?.meals?.length ?? 0} entries</Text>
+              )}
+              <PressableScale
+                haptic="selection"
+                onPress={() => openAddMeal(undefined, date, 'quick')}
+                style={styles.headerQuickAddChip}
+                accessibilityLabel="Quick add food or calories"
+              >
+                <Zap size={12} color={colors.amber} />
+                <Text style={styles.headerQuickAddText}>Quick Add</Text>
+              </PressableScale>
+            </View>
           </View>
         </Animated.View>
 
@@ -661,6 +795,14 @@ export default function NutritionScreen() {
                     </View>
                     <Text style={styles.mealGroupTitle}>{meta.label}</Text>
                     <Text style={styles.mealGroupKcal}>{formatNumber(group.calories)} kcal</Text>
+                    <PressableScale
+                      haptic="selection"
+                      onPress={() => openAddMeal(group.type, date, 'quick')}
+                      style={styles.groupQuickAddBtn}
+                      accessibilityLabel={`Quick add calories to ${meta.label}`}
+                    >
+                      <Zap size={14} color={colors.amber} />
+                    </PressableScale>
                     <PressableScale
                       haptic="selection"
                       onPress={() => openAddMeal(group.type)}
@@ -1397,6 +1539,11 @@ const useStyles = makeStyles(({ colors }) => ({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  waterAmountBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   waterAmount: {
     fontSize: 16,
     fontWeight: '800',
@@ -1406,6 +1553,110 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 12,
     fontWeight: '500',
     color: colors.textMuted,
+  },
+  waterPresetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.sm,
+  },
+  waterPresetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  waterPresetHighlight: {
+    borderColor: 'rgba(59, 130, 246, 0.4)',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+  },
+  waterPresetPlus: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.blue,
+  },
+  waterPresetAmount: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  waterPresetLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  waterPresetUndo: {
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  waterPresetUndoText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.error,
+  },
+  waterCustomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  waterCustomInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  waterSaveBtn: {
+    width: 38,
+    height: 38,
+    backgroundColor: colors.blue,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  waterCancelBtn: {
+    width: 32,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  headerQuickAddChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.25)',
+  },
+  headerQuickAddText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.amber,
+  },
+  groupQuickAddBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
   historyProgressBar: {
     marginTop: spacing.xs,
