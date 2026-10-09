@@ -1,14 +1,20 @@
 import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight, Dumbbell } from 'lucide-react-native';
+import { ChevronRight, Dumbbell, X } from 'lucide-react-native';
 import { PressableScale } from '../../components/ui';
 import { makeStyles, radius, spacing, useTheme } from '../../theme';
-import { draftHasContent, loadWorkoutDraft, type WorkoutDraft } from './draft';
-import { formatClock } from './RestTimer';
+import {
+  dismissWorkoutDraftForSession,
+  draftHasContent,
+  formatDraftAge,
+  isWorkoutDraftDismissedForSession,
+  loadWorkoutDraft,
+  type WorkoutDraft,
+} from './draft';
 
 /** Shown on Home and Workouts while an unfinished workout is saved on the device. */
-export function ResumeWorkoutBanner() {
+export function ResumeWorkoutBanner({ featured = false }: { featured?: boolean }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const router = useRouter();
@@ -17,38 +23,51 @@ export function ResumeWorkoutBanner() {
   useFocusEffect(
     useCallback(() => {
       const d = loadWorkoutDraft();
-      setDraft(d && draftHasContent(d) ? d : null);
+      const hasUndismissedContent = !!d && draftHasContent(d) && !isWorkoutDraftDismissedForSession(d);
+      setDraft(hasUndismissedContent ? d : null);
     }, [])
   );
 
   if (!draft) return null;
   const sets = draft.exercises.reduce((n, ex) => n + ex.sets.filter((s) => s.done).length, 0);
-  // Time from start to the last logged change.
-  const elapsed = Math.max(0, (draft.updatedAt - draft.startedAt) / 1000);
 
   return (
-    <PressableScale
-      haptic="light"
-      onPress={() => router.push({ pathname: '/workout/log', params: { resume: '1' } })}
-      style={styles.banner}
-      accessibilityRole="button"
-      accessibilityLabel={`Resume ${draft.title || 'workout'} in progress`}
-    >
-      <View style={styles.icon}>
-        <Dumbbell size={18} color={colors.textInverse} />
-      </View>
-      <View style={styles.flex}>
-        <Text style={styles.eyebrow}>Workout in progress</Text>
-        <Text style={styles.title} numberOfLines={1}>
-          {draft.title || 'Workout'}
-        </Text>
-        <Text style={styles.meta}>
-          {sets} {sets === 1 ? 'set' : 'sets'} done{draft.live ? ` · ${formatClock(elapsed)} in` : ''}
-        </Text>
-      </View>
-      <Text style={styles.cta}>Resume</Text>
-      <ChevronRight size={18} color={colors.primaryLight} />
-    </PressableScale>
+    <View style={[styles.banner, featured && styles.featuredBanner]}>
+      <PressableScale
+        haptic="light"
+        onPress={() => router.push({ pathname: '/workout/log', params: { resume: '1' } })}
+        style={[styles.pressable, featured && styles.featuredPressable]}
+        accessibilityRole="button"
+        accessibilityLabel={`Resume ${draft.title || 'workout'} in progress`}
+      >
+        <View style={[styles.icon, featured && styles.featuredIcon]}>
+          <Dumbbell size={featured ? 21 : 18} color={colors.textInverse} />
+        </View>
+        <View style={styles.flex}>
+          <Text style={[styles.eyebrow, featured && styles.featuredEyebrow]}>Workout in progress</Text>
+          <Text style={styles.title} numberOfLines={featured ? 2 : 1}>
+            {draft.title || 'Workout'}
+          </Text>
+          <Text style={styles.meta}>
+            {sets} {sets === 1 ? 'set' : 'sets'} done · {formatDraftAge(draft.startedAt)}
+          </Text>
+        </View>
+        <Text style={styles.cta}>Resume</Text>
+        <ChevronRight size={18} color={colors.primaryLight} />
+      </PressableScale>
+      <PressableScale
+        haptic="light"
+        onPress={() => {
+          dismissWorkoutDraftForSession(draft);
+          setDraft(null);
+        }}
+        style={styles.dismiss}
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss"
+      >
+        <X size={16} color={colors.textSecondary} />
+      </PressableScale>
+    </View>
   );
 }
 
@@ -56,13 +75,32 @@ const useStyles = makeStyles(({ colors }) => ({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
     marginBottom: spacing.lg,
     borderRadius: radius.lg,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
     borderWidth: 1,
     borderColor: colors.borderGlow,
+  },
+  featuredBanner: {
+    marginBottom: spacing.xl,
+    borderRadius: radius.xl,
+    borderColor: colors.primaryLight,
+  },
+  pressable: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  featuredPressable: {
+    padding: spacing.lg,
+  },
+  dismiss: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
   },
   icon: {
     width: 40,
@@ -71,6 +109,11 @@ const useStyles = makeStyles(({ colors }) => ({
     backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  featuredIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.lg,
   },
   flex: {
     flex: 1,
@@ -81,6 +124,9 @@ const useStyles = makeStyles(({ colors }) => ({
     color: colors.primaryLight,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
+  },
+  featuredEyebrow: {
+    fontSize: 12,
   },
   title: {
     fontSize: 15,

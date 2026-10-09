@@ -450,44 +450,43 @@ export default function NutritionScreen() {
           <>
             <DateNavigator date={date} onChange={setDate} />
 
-        {/* Plan Mode & Target Banner */}
+        {/* Plan Mode caption — kept lightweight (no card/border) so the hero card below
+            remains the clear primary focus of the screen. */}
         <Animated.View entering={enter(0)}>
-          <Card style={styles.planBannerCard}>
-            <View style={styles.planBannerRow}>
-              <View
-                style={[
-                  styles.planBannerIcon,
-                  { backgroundColor: isBulk ? `${colors.amber}20` : isCut ? `${colors.primaryLight}20` : `${colors.cyan}20` },
-                ]}
-              >
-                {isBulk ? (
-                  <Dumbbell size={18} color={colors.amber} />
-                ) : isCut ? (
-                  <Flame size={18} color={colors.primaryLight} />
-                ) : (
-                  <ShieldCheck size={18} color={colors.cyan} />
-                )}
-              </View>
-              <View style={styles.planBannerInfo}>
-                <View style={styles.planBannerTitleRow}>
-                  <Text style={styles.planBannerTitle}>
-                    {isBulk ? 'Bulk Plan · Surplus Floor' : isCut ? 'Cut Plan · Deficit Ceiling' : 'Maintenance Plan'}
-                  </Text>
-                  <Badge
-                    label={isBulk ? 'Min Target' : isCut ? 'Deficit Max' : 'Target'}
-                    tone={isBulk ? 'amber' : isCut ? 'cyan' : 'slate'}
-                  />
-                </View>
-                <Text style={styles.planBannerDesc}>
-                  {isBulk
-                    ? `Eat at least ${formatNumber(caloriesTarget)} kcal with ${targets?.protein_g || 160}g protein to maximize muscle growth.`
-                    : isCut
-                    ? `Stay under ${formatNumber(caloriesTarget)} kcal while hitting ${targets?.protein_g || 160}g protein to protect lean muscle.`
-                    : `Aim for ${formatNumber(caloriesTarget)} kcal and ${targets?.protein_g || 160}g protein daily.`}
-                </Text>
-              </View>
+          <View style={styles.planBannerRow}>
+            <View
+              style={[
+                styles.planBannerIcon,
+                { backgroundColor: isBulk ? `${colors.amber}20` : isCut ? `${colors.primaryLight}20` : `${colors.cyan}20` },
+              ]}
+            >
+              {isBulk ? (
+                <Dumbbell size={14} color={colors.amber} />
+              ) : isCut ? (
+                <Flame size={14} color={colors.primaryLight} />
+              ) : (
+                <ShieldCheck size={14} color={colors.cyan} />
+              )}
             </View>
-          </Card>
+            <View style={styles.planBannerInfo}>
+              <View style={styles.planBannerTitleRow}>
+                <Text style={styles.planBannerTitle}>
+                  {isBulk ? 'Bulk Plan · Surplus Floor' : isCut ? 'Cut Plan · Deficit Ceiling' : 'Maintenance Plan'}
+                </Text>
+                <Badge
+                  label={isBulk ? 'Min Target' : isCut ? 'Deficit Max' : 'Target'}
+                  tone={isBulk ? 'amber' : isCut ? 'cyan' : 'slate'}
+                />
+              </View>
+              <Text style={styles.planBannerDesc} numberOfLines={2}>
+                {isBulk
+                  ? `Eat at least ${formatNumber(caloriesTarget)} kcal with ${targets?.protein_g || 160}g protein to maximize muscle growth.`
+                  : isCut
+                  ? `Stay under ${formatNumber(caloriesTarget)} kcal while hitting ${targets?.protein_g || 160}g protein to protect lean muscle.`
+                  : `Aim for ${formatNumber(caloriesTarget)} kcal and ${targets?.protein_g || 160}g protein daily.`}
+              </Text>
+            </View>
+          </View>
         </Animated.View>
 
         {/* Calorie hero */}
@@ -724,17 +723,6 @@ export default function NutritionScreen() {
                 <Text style={styles.waterPresetAmount}>1000ml</Text>
                 <Text style={styles.waterPresetLabel}>Flask</Text>
               </PressableScale>
-
-              {waterMl > 0 && (
-                <PressableScale
-                  haptic="selection"
-                  onPress={() => waterMutation.mutate(Math.max(0, waterMl - 250))}
-                  style={[styles.waterPresetChip, styles.waterPresetUndo]}
-                  accessibilityLabel="Undo 250ml"
-                >
-                  <Text style={styles.waterPresetUndoText}>−250ml</Text>
-                </PressableScale>
-              )}
             </View>
 
             <View style={styles.waterControls}>
@@ -1123,7 +1111,7 @@ function NutritionHistoryCard({
   };
 
   return (
-    <Card elevated style={[styles.historyCard, isSelected && styles.historyCardSelected]}>
+    <Card style={[styles.historyCard, isSelected && styles.historyCardSelected]}>
       <PressableScale
         haptic="selection"
         scaleTo={0.99}
@@ -1323,22 +1311,17 @@ const useStyles = makeStyles(({ colors }) => ({
     color: colors.primaryLight,
     fontWeight: '800',
   },
-  planBannerCard: {
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceElevated,
-  },
   planBannerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm + 2,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    marginBottom: spacing.md,
   },
   planBannerIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.md,
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1352,14 +1335,14 @@ const useStyles = makeStyles(({ colors }) => ({
     marginBottom: 2,
   },
   planBannerTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   planBannerDesc: {
     fontSize: 11,
     fontWeight: '500',
-    color: colors.textSecondary,
+    color: colors.textMuted,
     lineHeight: 15,
   },
   macroSublabel: {
@@ -1508,7 +1491,7 @@ const useStyles = makeStyles(({ colors }) => ({
   },
   waterCard: {
     padding: spacing.md,
-    marginTop: spacing.md,
+    marginTop: spacing.lg,
   },
   waterHeader: {
     flexDirection: 'row',
@@ -1589,15 +1572,6 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 10,
     fontWeight: '600',
     color: colors.textSecondary,
-  },
-  waterPresetUndo: {
-    borderColor: 'rgba(239, 68, 68, 0.25)',
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-  },
-  waterPresetUndoText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.error,
   },
   waterCustomRow: {
     flexDirection: 'row',
@@ -1700,7 +1674,7 @@ const useStyles = makeStyles(({ colors }) => ({
   },
   mealGroupCard: {
     padding: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   mealGroupHeader: {
     flexDirection: 'row',

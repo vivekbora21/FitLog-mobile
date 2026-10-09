@@ -84,7 +84,8 @@ interface Props {
   isLoading?: boolean;
   onRefresh?: () => void;
   currentWeight?: number | null;
-  onRequestUpload?: () => void;
+  /** Opens the upload studio as soon as this component mounts (e.g. deep-linked from Quick Add). */
+  autoOpenUpload?: boolean;
 }
 
 export const ANGLE_LABELS: Record<string, string> = {
@@ -116,6 +117,7 @@ export function ProgressPhotoGallery({
   isLoading,
   onRefresh,
   currentWeight,
+  autoOpenUpload,
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -125,7 +127,7 @@ export function ProgressPhotoGallery({
   const [lightboxPhoto, setLightboxPhoto] = useState<ProgressPhoto | null>(null);
 
   // Studio / Upload State
-  const [isStudioOpen, setIsStudioOpen] = useState(false);
+  const [isStudioOpen, setIsStudioOpen] = useState(() => !!autoOpenUpload);
   const [selectedAngle, setSelectedAngle] = useState<string>('FRONT');
   const [showPostureGuide, setShowPostureGuide] = useState(true);
   const [capturedUri, setCapturedUri] = useState<string | null>(null);

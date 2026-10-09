@@ -2,9 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { View, Text } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Flame } from 'lucide-react-native';
-import { Card, Badge, PressableScale } from '../ui';
-import { radius, spacing, useTheme } from '../../theme';
-import { useStyles } from './NutritionProgressSection.styles';
+import { Card, Badge, PeriodFilter } from '../ui';
+import { BarChart, type BarChartDatum } from '../charts';
+import { useTheme } from '../../theme';
+import { useStyles } from './CalorieBurnSection.styles';
 import { formatNumber } from '../../types';
 import type { DashboardStats, CalorieBurnHistoryDay } from '../../types';
 
@@ -16,24 +17,17 @@ interface CalorieBurnSectionProps {
 
 type Granularity = 'DAY' | 'WEEK' | 'MONTH';
 
-const GRANULARITIES: { key: Granularity; label: string }[] = [
-  { key: 'DAY', label: 'Days' },
-  { key: 'WEEK', label: 'Weeks' },
-  { key: 'MONTH', label: 'Months' },
+const GRANULARITIES: { value: Granularity; label: string }[] = [
+  { value: 'DAY', label: 'Days' },
+  { value: 'WEEK', label: 'Weeks' },
+  { value: 'MONTH', label: 'Months' },
 ];
-
-interface Bucket {
-  key: string;
-  label: string;
-  value: number;
-  active: boolean;
-}
 
 function parseDateKey(key: string): Date {
   return new Date(`${key}T00:00:00`);
 }
 
-function buildDayBuckets(history: CalorieBurnHistoryDay[], count: number): Bucket[] {
+function buildDayBuckets(history: CalorieBurnHistoryDay[], count: number): BarChartDatum[] {
   return [...history]
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(-count)
@@ -53,7 +47,7 @@ function mondayOf(d: Date): Date {
   return monday;
 }
 
-function buildWeekBuckets(history: CalorieBurnHistoryDay[], count: number): Bucket[] {
+function buildWeekBuckets(history: CalorieBurnHistoryDay[], count: number): BarChartDatum[] {
   const byWeek = new Map<string, { sum: number; active: boolean }>();
   for (const d of history) {
     const key = mondayOf(parseDateKey(d.date)).toISOString().slice(0, 10);
@@ -76,7 +70,7 @@ function buildWeekBuckets(history: CalorieBurnHistoryDay[], count: number): Buck
     });
 }
 
-function buildMonthBuckets(history: CalorieBurnHistoryDay[], count: number): Bucket[] {
+function buildMonthBuckets(history: CalorieBurnHistoryDay[], count: number): BarChartDatum[] {
   const byMonth = new Map<string, { sum: number; active: boolean }>();
   for (const d of history) {
     const key = d.date.slice(0, 7);
@@ -115,16 +109,16 @@ export function CalorieBurnSection({ dashboardStats, history, isLoading }: Calor
 
   const hasAnyWorkout = (history || []).some((d) => d.has_workout);
 
-  const buckets = useMemo<Bucket[]>(() => {
+  const buckets = useMemo<BarChartDatum[]>(() => {
     if (!history || !history.length) return [];
     if (granularity === 'DAY') return buildDayBuckets(history, 14);
     if (granularity === 'WEEK') return buildWeekBuckets(history, 8);
     return buildMonthBuckets(history, 6);
   }, [history, granularity]);
 
-  const maxVal = Math.max(1, ...buckets.map((b) => b.value));
   const totalBurned = buckets.reduce((sum, b) => sum + b.value, 0);
   const activeCount = buckets.filter((b) => b.active).length;
+  const granularityNoun = granularity === 'DAY' ? 'days' : granularity === 'WEEK' ? 'weeks' : 'months';
 
   if (isLoading && !history) {
     return (
@@ -183,58 +177,30 @@ export function CalorieBurnSection({ dashboardStats, history, isLoading }: Calor
               <View>
                 <Text style={styles.chartTitle}>History</Text>
                 <Text style={styles.chartSub}>
-                  {formatNumber(totalBurned)} kcal · {activeCount} active {granularity === 'DAY' ? 'days' : granularity === 'WEEK' ? 'weeks' : 'months'}
+                  {formatNumber(totalBurned)} kcal · {activeCount} active {granularityNoun}
                 </Text>
               </View>
             </View>
             <Badge label={`${pct}% of weekly goal`} tone={pct >= 100 ? 'emerald' : pct >= 50 ? 'amber' : 'slate'} />
           </View>
 
-          <View style={styles.timeframeRow}>
-            {GRANULARITIES.map((g) => {
-              const active = granularity === g.key;
-              return (
-                <PressableScale
-                  key={g.key}
-                  haptic="selection"
-                  onPress={() => setGranularity(g.key)}
-                  style={[styles.timeframeBtn, active && styles.timeframeBtnActive]}
-                  accessibilityLabel={`Show by ${g.label}`}
-                >
-                  <Text style={[styles.timeframeBtnText, active && styles.timeframeBtnTextActive]}>
-                    {g.label}
-                  </Text>
-                </PressableScale>
-              );
-            })}
+          <View style={styles.periodFilterWrap}>
+            <PeriodFilter
+              options={GRANULARITIES}
+              value={granularity}
+              onChange={setGranularity}
+              accessibilityLabel="Calorie burn granularity"
+            />
           </View>
 
           {buckets.length ? (
-            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: spacing.md }}>
-              {buckets.map((b) => {
-                const barHeight = b.value > 0 ? Math.max(6, (b.value / maxVal) * 120) : 4;
-                return (
-                  <View key={b.key} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
-                    <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textMuted }} numberOfLines={1}>
-                      {b.value > 0 ? Math.round(b.value) : ''}
-                    </Text>
-                    <View style={{ width: '100%', height: 120, justifyContent: 'flex-end' }}>
-                      <View
-                        style={{
-                          width: '100%',
-                          height: barHeight,
-                          borderRadius: radius.sm,
-                          backgroundColor: b.value > 0 ? colors.rose : colors.borderSubtle,
-                        }}
-                      />
-                    </View>
-                    <Text style={{ fontSize: 9, color: colors.textMuted, fontWeight: '600' }} numberOfLines={1}>
-                      {b.label}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
+            <BarChart
+              data={buckets}
+              color={colors.rose}
+              unit="kcal"
+              formatValue={(v) => formatNumber(Math.round(v))}
+              accessibilityLabel="Calories burned history"
+            />
           ) : (
             <View style={styles.emptyChartBox}>
               <Flame size={24} color={colors.textMuted} />

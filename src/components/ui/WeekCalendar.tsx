@@ -342,7 +342,7 @@ const useStyles = makeStyles(({ colors }) => ({
     gap: 6,
   },
   dayColSelected: {
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: colors.tealTint,
     borderWidth: 1.5,
     borderColor: colors.primaryLight,
   },
@@ -384,7 +384,7 @@ const useStyles = makeStyles(({ colors }) => ({
   dayDotTodayEmpty: {
     borderColor: colors.primaryLight,
     borderWidth: 1.5,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
   },
   dayDotSelected: {
     shadowColor: colors.primary,

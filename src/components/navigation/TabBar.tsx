@@ -22,7 +22,8 @@ const SPRING = { damping: 20, stiffness: 220, mass: 0.8 };
 /** Bottom padding a tab screen's scroll content needs to clear the floating bar. */
 export function useTabBarClearance(): number {
   const insets = useSafeAreaInsets();
-  return TAB_BAR_HEIGHT + Math.max(insets.bottom, BAR_MARGIN) + spacing.xl;
+  // The bar is absolutely positioned and the add FAB rises above its top edge.
+  return TAB_BAR_HEIGHT + Math.max(insets.bottom, BAR_MARGIN) + spacing.xxl;
 }
 
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {

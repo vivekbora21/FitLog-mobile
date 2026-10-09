@@ -1,16 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import { View, Text } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut, runOnJS } from 'react-native-reanimated';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Svg, {
-  Defs,
-  LinearGradient,
-  Stop,
-  Path,
-  Circle,
-  Line,
-  Text as SvgText,
-} from 'react-native-svg';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
   Utensils,
   Flame,
@@ -26,14 +16,14 @@ import {
   Droplet,
   Zap,
 } from 'lucide-react-native';
-import { Card, Badge, Button, PressableScale } from '../ui';
-import { radius, spacing, useTheme } from '../../theme';
+import { Card, Badge, Button, PressableScale, PeriodFilter } from '../ui';
+import { LineChart } from '../charts';
+import { spacing, useTheme } from '../../theme';
 import { useStyles } from './NutritionProgressSection.styles';
 import { formatNumber } from '../../types';
 import type { NutritionHistoryResponse, NutritionHistoryDay, WeightEntry, WeeklyNutritionSummary } from '../../types';
 import { computeWeeklyNutritionSummaries, calculateMacroRatio } from '../../lib/nutritionWeeks';
-import { haptics } from '../../lib/haptics';
-import { toDateKey } from '../../lib/format';
+import { computeLoggingStreak } from '../../lib/format';
 
 // ─── Timeframe Filter ─────────────────────────────────────────────────────────
 
@@ -46,6 +36,8 @@ const TIMEFRAMES: { key: Timeframe; label: string; days: number }[] = [
   { key: '6M', label: '6M', days: 180 },
   { key: '1Y', label: '1Y', days: 365 },
 ];
+
+const TIMEFRAME_OPTIONS = TIMEFRAMES.map((t) => ({ value: t.key, label: t.label }));
 
 // ─── Nutrient Metric Selector ─────────────────────────────────────────────────
 
@@ -134,25 +126,10 @@ export function NutritionProgressSection({
 
   const chartDays = useMemo(() => getFilteredDays(timeframe), [timeframe, getFilteredDays]);
 
-  // Consecutive-day logging streak, counted backward from the most recent day
-  // the user had a chance to log (today, or the latest day present in history).
   const loggingStreak = useMemo(() => {
     if (!nutritionHistory?.history?.length) return 0;
     const byDate = new Map(nutritionHistory.history.map((d) => [d.date, d]));
-    const cursor = new Date();
-    cursor.setHours(0, 0, 0, 0);
-    // If today has no entry yet (not logged, day in progress), start counting from yesterday.
-    if (!byDate.get(toDateKey(cursor))?.has_logged) {
-      cursor.setDate(cursor.getDate() - 1);
-    }
-    let streak = 0;
-    while (true) {
-      const day = byDate.get(toDateKey(cursor));
-      if (!day?.has_logged) break;
-      streak += 1;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-    return streak;
+    return computeLoggingStreak((dateKey) => !!byDate.get(dateKey)?.has_logged);
   }, [nutritionHistory]);
 
   const metricConfig = METRICS.find((m) => m.key === metric)!;
@@ -168,6 +145,26 @@ export function NutritionProgressSection({
         return currentWeek?.target_fat || nutritionHistory?.targets?.fat_g || 70;
     }
   }, [metric, targetCalories, targetProtein, currentWeek, nutritionHistory]);
+
+  // Chart data/stats for the currently selected metric + timeframe
+  const chartValues = useMemo(
+    () => chartDays.map((d) => d[metricConfig.valueKey] as number),
+    [chartDays, metricConfig.valueKey]
+  );
+  const chartLineData = useMemo(
+    () => chartDays.map((d) => ({ value: d[metricConfig.valueKey] as number, date: d.date })),
+    [chartDays, metricConfig.valueKey]
+  );
+  const chartAvg = useMemo(() => {
+    const valid = chartValues.filter((v) => v > 0);
+    if (!valid.length) return 0;
+    return Math.round(valid.reduce((s, v) => s + v, 0) / valid.length);
+  }, [chartValues]);
+  const chartTrend = useMemo(() => {
+    const valid = chartValues.filter((v) => v > 0);
+    if (valid.length < 2) return null;
+    return valid[valid.length - 1] - valid[0];
+  }, [chartValues]);
 
   // Weight map per week for correlation
   const weightByWeek = useMemo(() => {
@@ -233,8 +230,10 @@ export function NutritionProgressSection({
   return (
     <View style={styles.container}>
       {/* ── KPI Summary Row ── */}
+      {/* "This Week Avg" leads as the primary number (elevated + accent border); the other
+          two KPIs stay visually quieter so hierarchy reads at a glance. */}
       <Animated.View entering={enter(0)} style={styles.metricsRow}>
-        <Card style={styles.metricCard}>
+        <Card elevated style={[styles.metricCard, styles.metricCardPrimary]}>
           <Flame size={14} color={colors.primaryLight} />
           <Text style={styles.metricLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
             This Week Avg
@@ -369,19 +368,72 @@ export function NutritionProgressSection({
             })}
           </View>
 
-          <TimeframeFilter selected={timeframe} onChange={setTimeframe} />
+          <View style={styles.periodFilterWrap}>
+            <PeriodFilter
+              options={TIMEFRAME_OPTIONS}
+              value={timeframe}
+              onChange={setTimeframe}
+              accessibilityLabel="Nutrition chart period"
+            />
+          </View>
 
           {chartDays.length >= 1 ? (
-            <DailyNutrientChart
-              days={chartDays}
-              valueKey={metricConfig.valueKey}
-              targetValue={metricTarget}
-              color={colors[metricConfig.colorKey]}
-              gradientId={`${metric}Grad`}
-              unit={metricConfig.unit}
-              formatLabel={metricConfig.formatLabel}
-              timeframe={timeframe}
-            />
+            <>
+              <View style={styles.chartStatsRow}>
+                <View style={styles.chartStatPill}>
+                  <Text style={styles.chartStatLabel}>Avg</Text>
+                  <Text style={[styles.chartStatValue, { color: colors[metricConfig.colorKey] }]}>
+                    {metricConfig.formatLabel(chartAvg)} <Text style={styles.chartStatUnit}>{metricConfig.unit}</Text>
+                  </Text>
+                </View>
+                {chartTrend != null ? (
+                  <View style={[styles.chartStatPill, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                    {chartTrend < 0 ? (
+                      <TrendingDown size={12} color={colors.primaryLight} strokeWidth={2.5} />
+                    ) : chartTrend > 0 ? (
+                      <TrendingUp size={12} color={colors.amber} strokeWidth={2.5} />
+                    ) : (
+                      <Minus size={12} color={colors.textMuted} strokeWidth={2.5} />
+                    )}
+                    <Text
+                      style={[
+                        styles.chartStatValue,
+                        {
+                          color:
+                            metric === 'calories'
+                              ? chartTrend <= 0 ? colors.primaryLight : colors.amber
+                              : chartTrend >= 0 ? colors.primaryLight : colors.amber,
+                        },
+                      ]}
+                    >
+                      {chartTrend > 0 ? `+${metricConfig.formatLabel(chartTrend)}` : metricConfig.formatLabel(chartTrend)}{' '}
+                      <Text style={styles.chartStatUnit}>{metricConfig.unit}</Text>
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.chartStatPill}>
+                    <Text style={styles.chartStatLabel}>Log</Text>
+                    <Text style={[styles.chartStatValue, { fontSize: 11, color: colors.textMuted }]}>Day 1</Text>
+                  </View>
+                )}
+                <View style={styles.chartStatPill}>
+                  <Text style={styles.chartStatLabel}>Target</Text>
+                  <Text style={styles.chartStatValue}>
+                    {metricConfig.formatLabel(metricTarget)} <Text style={styles.chartStatUnit}>{metricConfig.unit}</Text>
+                  </Text>
+                </View>
+              </View>
+
+              <LineChart
+                data={chartLineData}
+                color={colors[metricConfig.colorKey]}
+                targetValue={metricTarget}
+                targetLabel="Target"
+                unit={metricConfig.unit}
+                formatValue={metricConfig.formatLabel}
+                accessibilityLabel={`Daily ${metricConfig.label} chart`}
+              />
+            </>
           ) : (
             <View style={styles.emptyChartBox}>
               <metricConfig.icon size={24} color={colors.textMuted} />
@@ -558,420 +610,4 @@ export function NutritionProgressSection({
     </View>
   );
 }
-
-// ─── Timeframe Filter Bar ─────────────────────────────────────────────────────
-
-function TimeframeFilter({
-  selected,
-  onChange,
-}: {
-  selected: Timeframe;
-  onChange: (t: Timeframe) => void;
-}) {
-  const styles = useStyles();
-  const { colors } = useTheme();
-  return (
-    <View style={styles.timeframeRow}>
-      {TIMEFRAMES.map((tf) => {
-        const active = selected === tf.key;
-        return (
-          <PressableScale
-            key={tf.key}
-            haptic="selection"
-            onPress={() => onChange(tf.key)}
-            style={[styles.timeframeBtn, active && styles.timeframeBtnActive]}
-            accessibilityLabel={`Show ${tf.label} data`}
-          >
-            <Text style={[styles.timeframeBtnText, active && styles.timeframeBtnTextActive]}>
-              {tf.label}
-            </Text>
-          </PressableScale>
-        );
-      })}
-    </View>
-  );
-}
-
-// ─── Daily Nutrient SVG Chart ─────────────────────────────────────────────────
-
-interface DailyNutrientChartProps {
-  days: NutritionHistoryDay[];
-  valueKey: 'total_calories' | 'total_protein' | 'total_carbs' | 'total_fat';
-  targetValue: number;
-  color: string;
-  gradientId: string;
-  unit: string;
-  formatLabel: (v: number) => string;
-  timeframe: Timeframe;
-}
-
-function DailyNutrientChart({
-  days,
-  valueKey,
-  targetValue,
-  color,
-  gradientId,
-  unit,
-  formatLabel,
-  timeframe,
-}: DailyNutrientChartProps) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const [layoutWidth, setLayoutWidth] = useState(320);
-  const [scrubIndex, setScrubIndex] = useState<number | null>(null);
-
-  const CHART_H = 172;
-  const PAD_H = 8;
-  const PAD_TOP = 24;
-  const PAD_BOT = 30;
-  const innerW = Math.max(100, layoutWidth - PAD_H * 2);
-  const innerH = CHART_H - PAD_TOP - PAD_BOT;
-
-  const values = useMemo(() => days.map((d) => d[valueKey] as number), [days, valueKey]);
-
-  const maxVal = useMemo(() => Math.max(...values, targetValue * 1.1), [values, targetValue]);
-  const minVal = useMemo(
-    () => Math.min(...values.filter((v) => v > 0), targetValue * 0.82),
-    [values, targetValue]
-  );
-  const chartMin = minVal - (maxVal - minVal) * 0.08;
-  const chartMax = maxVal + (maxVal - minVal) * 0.12;
-  const valRange = Math.max(chartMax - chartMin, 1);
-
-  const getX = useCallback(
-    (i: number) => PAD_H + (days.length <= 1 ? innerW / 2 : (i / (days.length - 1)) * innerW),
-    [days.length, innerW]
-  );
-  const getY = useCallback(
-    (v: number) => PAD_TOP + (1 - (v - chartMin) / valRange) * innerH,
-    [chartMin, valRange, innerH]
-  );
-
-  const targetY = getY(targetValue);
-
-  const points = useMemo(
-    () =>
-      days.map((d, i) => ({
-        x: getX(i),
-        y: getY(d[valueKey] as number),
-        value: d[valueKey] as number,
-        date: d.date,
-      })),
-    [days, valueKey, getX, getY]
-  );
-
-  const linePath = useMemo(
-    () => {
-      if (points.length < 2) return '';
-      return points.reduce((acc, pt, i) => (i === 0 ? `M ${pt.x},${pt.y}` : `${acc} L ${pt.x},${pt.y}`), '');
-    },
-    [points]
-  );
-  const areaPath = useMemo(() => {
-    if (points.length < 2) return '';
-    const bot = CHART_H - PAD_BOT;
-    return `${linePath} L ${points[points.length - 1].x},${bot} L ${points[0].x},${bot} Z`;
-  }, [linePath, points]);
-
-  const onScrub = useCallback(
-    (touchX: number) => {
-      if (!points.length) return;
-      let idx = 0;
-      let best = Math.abs(points[0].x - touchX);
-      for (let i = 1; i < points.length; i++) {
-        const d = Math.abs(points[i].x - touchX);
-        if (d < best) { best = d; idx = i; }
-      }
-      setScrubIndex((prev) => {
-        if (prev !== idx) haptics.selection();
-        return idx;
-      });
-    },
-    [points]
-  );
-
-  const composedGesture = useMemo(() => {
-    const pan = Gesture.Pan()
-      .onBegin((e) => { 'worklet'; runOnJS(onScrub)(e.x); })
-      .onUpdate((e) => { 'worklet'; runOnJS(onScrub)(e.x); });
-    const tap = Gesture.Tap().onEnd((e) => { 'worklet'; runOnJS(onScrub)(e.x); });
-    return Gesture.Race(pan, tap);
-  }, [onScrub]);
-
-  const activePoint = scrubIndex != null ? points[scrubIndex] : null;
-
-  // Stats
-  const avg = useMemo(() => {
-    const valid = values.filter((v) => v > 0);
-    if (!valid.length) return 0;
-    return Math.round(valid.reduce((s, v) => s + v, 0) / valid.length);
-  }, [values]);
-
-  const trend = useMemo(() => {
-    const valid = values.filter((v) => v > 0);
-    if (valid.length < 2) return null;
-    return valid[valid.length - 1] - valid[0];
-  }, [values]);
-
-  // Y-axis reference labels
-  const yMid = (chartMax + chartMin) / 2;
-
-  // Axis date labels - show up to 5 evenly distributed
-  const axisLabels = useMemo(() => {
-    if (days.length === 0) return [];
-    const maxLabels = 5;
-    const step = Math.max(1, Math.floor((days.length - 1) / (maxLabels - 1)));
-    const indices = new Set<number>();
-    for (let i = 0; i < days.length; i += step) indices.add(Math.min(i, days.length - 1));
-    indices.add(days.length - 1);
-    return [...indices].sort((a, b) => a - b).map((i) => ({
-      x: getX(i),
-      label: days[i].date.slice(5), // MM-DD
-    }));
-  }, [days, getX]);
-
-  return (
-    <Animated.View
-      entering={FadeInDown.duration(350)}
-      style={styles.chartContainer}
-    >
-      {/* Stat pills */}
-      <View style={styles.chartStatsRow}>
-        <View style={styles.chartStatPill}>
-          <Text style={styles.chartStatLabel}>Avg</Text>
-          <Text style={[styles.chartStatValue, { color }]}>
-            {formatLabel(avg)}{' '}
-            <Text style={styles.chartStatUnit}>{unit}</Text>
-          </Text>
-        </View>
-        {trend != null ? (
-          <View style={[styles.chartStatPill, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
-            {trend < 0 ? (
-              <TrendingDown size={12} color={colors.primaryLight} strokeWidth={2.5} />
-            ) : trend > 0 ? (
-              <TrendingUp size={12} color={colors.amber} strokeWidth={2.5} />
-            ) : (
-              <Minus size={12} color={colors.textMuted} strokeWidth={2.5} />
-            )}
-            <Text
-              style={[
-                styles.chartStatValue,
-                {
-                  color:
-                    valueKey === 'total_calories'
-                      ? trend <= 0 ? colors.primaryLight : colors.amber
-                      : trend >= 0 ? colors.primaryLight : colors.amber,
-                },
-              ]}
-            >
-              {trend > 0 ? `+${formatLabel(trend)}` : formatLabel(trend)}{' '}
-              <Text style={styles.chartStatUnit}>{unit}</Text>
-            </Text>
-          </View>
-        ) : days.length === 1 ? (
-          <View style={styles.chartStatPill}>
-            <Text style={styles.chartStatLabel}>Log</Text>
-            <Text style={[styles.chartStatValue, { fontSize: 11, color: colors.textMuted }]}>
-              Day 1
-            </Text>
-          </View>
-        ) : null}
-        <View style={styles.chartStatPill}>
-          <Text style={styles.chartStatLabel}>Target</Text>
-          <Text style={styles.chartStatValue}>
-            {formatLabel(targetValue)} <Text style={styles.chartStatUnit}>{unit}</Text>
-          </Text>
-        </View>
-      </View>
-
-      {/* SVG */}
-      <GestureDetector gesture={composedGesture}>
-        <View
-          style={{ width: '100%', height: CHART_H }}
-          onLayout={(e) => {
-            const w = e.nativeEvent.layout.width;
-            if (w > 50) setLayoutWidth(w);
-          }}
-        >
-          <Svg width={layoutWidth} height={CHART_H}>
-            <Defs>
-              <LinearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
-                <Stop offset="0%" stopColor={color} stopOpacity="0.32" />
-                <Stop offset="100%" stopColor={color} stopOpacity="0.0" />
-              </LinearGradient>
-            </Defs>
-
-            {/* Grid lines */}
-            {[0, 0.5, 1].map((ratio, i) => (
-              <Line
-                key={`g${i}`}
-                x1={PAD_H}
-                y1={PAD_TOP + ratio * innerH}
-                x2={layoutWidth - PAD_H}
-                y2={PAD_TOP + ratio * innerH}
-                stroke={colors.borderSubtle}
-                strokeDasharray="3 4"
-                opacity={0.55}
-              />
-            ))}
-
-            {/* Y-axis labels */}
-            <SvgText x={PAD_H} y={PAD_TOP - 5} fontSize="9" fill={colors.textMuted} fontWeight="600">
-              {formatLabel(chartMax)}
-            </SvgText>
-            <SvgText x={PAD_H} y={PAD_TOP + innerH * 0.5 - 3} fontSize="9" fill={colors.textMuted} fontWeight="600">
-              {formatLabel(yMid)}
-            </SvgText>
-
-            {/* Target dashed line */}
-            <Line
-              x1={PAD_H}
-              y1={targetY}
-              x2={layoutWidth - PAD_H}
-              y2={targetY}
-              stroke={color}
-              strokeWidth={1.5}
-              strokeDasharray="5 4"
-              opacity={0.5}
-            />
-            <SvgText
-              x={layoutWidth - PAD_H - 2}
-              y={targetY - 5}
-              textAnchor="end"
-              fontSize="9"
-              fill={color}
-              fontWeight="700"
-              opacity={0.75}
-            >
-              Target
-            </SvgText>
-
-            {/* Single point horizontal guideline */}
-            {points.length === 1 && (
-              <Line
-                x1={PAD_H}
-                y1={points[0].y}
-                x2={layoutWidth - PAD_H}
-                y2={points[0].y}
-                stroke={color}
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                opacity={0.35}
-              />
-            )}
-
-            {/* Area fill */}
-            {areaPath !== '' && <Path d={areaPath} fill={`url(#${gradientId})`} />}
-
-            {/* Line */}
-            {linePath !== '' && (
-              <Path
-                d={linePath}
-                fill="none"
-                stroke={color}
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            )}
-
-            {/* Single point halo */}
-            {points.length === 1 && (
-              <Circle cx={points[0].x} cy={points[0].y} r={10} fill={color} fillOpacity={0.2} />
-            )}
-
-            {/* Dots – only when few points */}
-            {days.length <= 14 &&
-              points.map((pt, i) => (
-                <Circle
-                  key={`d${i}`}
-                  cx={pt.x}
-                  cy={pt.y}
-                  r={scrubIndex === i ? 5.5 : 3}
-                  fill={scrubIndex === i ? color : colors.surface}
-                  stroke={color}
-                  strokeWidth={1.5}
-                />
-              ))}
-
-            {/* Active scrub */}
-            {activePoint && (
-              <>
-                <Line
-                  x1={activePoint.x}
-                  y1={PAD_TOP}
-                  x2={activePoint.x}
-                  y2={CHART_H - PAD_BOT}
-                  stroke={color}
-                  strokeWidth={1.5}
-                  strokeDasharray="3 3"
-                  opacity={0.65}
-                />
-                <Circle cx={activePoint.x} cy={activePoint.y} r={8} fill={color} fillOpacity={0.18} />
-                <Circle cx={activePoint.x} cy={activePoint.y} r={4.5} fill={color} stroke="#FFFFFF" strokeWidth={2} />
-              </>
-            )}
-
-            {/* Bottom axis labels */}
-            {axisLabels.map((lbl, i) => (
-              <SvgText
-                key={`ax${i}`}
-                x={lbl.x}
-                y={CHART_H - 8}
-                textAnchor="middle"
-                fontSize="9"
-                fill={colors.textMuted}
-                fontWeight="600"
-              >
-                {lbl.label}
-              </SvgText>
-            ))}
-          </Svg>
-
-          {/* Floating tooltip */}
-          {activePoint && (
-            <Animated.View
-              entering={FadeIn.duration(120)}
-              exiting={FadeOut.duration(120)}
-              style={[
-                styles.tooltip,
-                {
-                  left: Math.max(4, Math.min(layoutWidth - 118, activePoint.x - 57)),
-                  borderColor: color,
-                },
-              ]}
-              pointerEvents="none"
-            >
-              <Text style={styles.tooltipDate}>{activePoint.date}</Text>
-              <Text style={[styles.tooltipValue, { color }]}>
-                {formatLabel(activePoint.value)}{' '}
-                <Text style={styles.tooltipUnit}>{unit}</Text>
-              </Text>
-              <View style={styles.tooltipVsTarget}>
-                <View
-                  style={[
-                    styles.tooltipDot,
-                    {
-                      backgroundColor:
-                        activePoint.value <= targetValue ? colors.primaryLight : colors.warning,
-                    },
-                  ]}
-                />
-                <Text style={styles.tooltipVsText}>
-                  {activePoint.value === targetValue
-                    ? 'On target'
-                    : activePoint.value > targetValue
-                    ? `+${formatLabel(activePoint.value - targetValue)} over`
-                    : `${formatLabel(targetValue - activePoint.value)} under`}
-                </Text>
-              </View>
-            </Animated.View>
-          )}
-        </View>
-      </GestureDetector>
-    </Animated.View>
-  );
-}
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
 

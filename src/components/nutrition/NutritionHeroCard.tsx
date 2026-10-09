@@ -304,7 +304,7 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
   gaugeContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: spacing.xs,
+    marginVertical: spacing.sm,
   },
   gaugeCenter: {
     alignItems: 'center',
@@ -320,10 +320,11 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
     marginBottom: 2,
   },
   primaryValue: {
-    fontSize: 34,
-    fontWeight: '800',
+    fontSize: 36,
+    fontWeight: '900',
     color: colors.textPrimary,
-    lineHeight: 40,
+    lineHeight: 42,
+    letterSpacing: -0.5,
     textAlign: 'center',
   },
   primaryLabel: {
@@ -354,14 +355,19 @@ const useStyles = makeStyles(({ colors, shadows }) => ({
     alignItems: 'stretch',
     gap: spacing.sm,
     width: '100%',
-    marginTop: spacing.md,
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
   },
   statCard: {
     flex: 1,
     backgroundColor: colors.surfaceElevated,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    // Secondary stats stay borderless by default so only the highlighted one pops —
+    // the gauge above remains the clear primary read.
+    borderColor: 'transparent',
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.xs + 2,
     alignItems: 'center',

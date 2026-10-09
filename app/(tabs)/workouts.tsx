@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, View, Text, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Animated, {
   Easing,
   FadeInDown,
@@ -63,9 +63,10 @@ import {
 import { haptics } from '../../src/lib/haptics';
 import { invalidateWorkoutData } from '../../src/lib/queries';
 import { ResumeWorkoutBanner } from '../../src/features/workout/ResumeWorkoutBanner';
+import { draftHasContent, loadWorkoutDraft } from '../../src/features/workout/draft';
 import { getRoutineExerciseDisplayName } from '../../src/lib/workout';
 
-const COLLAPSED_EXERCISES = 4;
+const COLLAPSED_EXERCISES = 3;
 const enter = (i: number) => FadeInDown.delay(60 + i * 60).duration(420);
 
 export default function WorkoutsScreen() {
@@ -76,6 +77,14 @@ export default function WorkoutsScreen() {
   const queryClient = useQueryClient();
   const [showAllExercises, setShowAllExercises] = useState(false);
   const [mountedAt] = useState(() => Date.now());
+  const [hasActiveDraft, setHasActiveDraft] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      const d = loadWorkoutDraft();
+      setHasActiveDraft(!!d && draftHasContent(d));
+    }, [])
+  );
 
   const todayKey = useMemo(() => toDateKey(new Date()), []);
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
@@ -107,9 +116,6 @@ export default function WorkoutsScreen() {
     error: sessionsError,
     refetch: refetchSessions,
     isRefetching: isSessionsRefetching,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ['workoutSessions'],
     queryFn: ({ pageParam }) => api.getWorkoutSessionsPage(pageParam),
@@ -310,7 +316,7 @@ export default function WorkoutsScreen() {
           }
         />
 
-        <ResumeWorkoutBanner />
+        <ResumeWorkoutBanner featured />
 
         {/* 7-day summary */}
         <Animated.View entering={enter(0)} style={styles.summaryRow}>
@@ -318,9 +324,10 @@ export default function WorkoutsScreen() {
             icon={<CheckCircle2 size={16} color={colors.primaryLight} />}
             value={String(weekSummary.count)}
             label="Sessions"
-            tint={colors.primarySurface}
+            tint={colors.tealTint}
             delta={weekSummary.countDelta}
           />
+          <View style={styles.summaryDivider} />
           <SummaryTile
             icon={<Layers size={16} color={colors.cyan} />}
             value={formatVolume(weekSummary.volume)}
@@ -333,6 +340,7 @@ export default function WorkoutsScreen() {
                 : null
             }
           />
+          <View style={styles.summaryDivider} />
           <SummaryTile
             icon={<Clock size={16} color={colors.amber} />}
             value={weekSummary.minutes ? `${weekSummary.minutes}m` : '0m'}
@@ -342,7 +350,7 @@ export default function WorkoutsScreen() {
             deltaUnit="m"
           />
         </Animated.View>
-        <Text style={styles.summaryCaption}>Last 7 days · trend vs prior 7 days</Text>
+        <Text style={styles.summaryCaption}>Last 7 days · compared with the week before</Text>
 
         {/* Plan & Progress links */}
         <Animated.View entering={enter(1)} style={styles.linksRow}>
@@ -428,7 +436,7 @@ export default function WorkoutsScreen() {
                     label={today?.status || (exercises.length ? 'Scheduled' : 'Rest')}
                     tone={isDone ? 'emerald' : exercises.length ? 'cyan' : 'slate'}
                   />
-                  <Text style={styles.routineTitle}>
+                  <Text style={styles.routineTitle} numberOfLines={2}>
                     {routine?.name || today?.label || 'Rest Day / Recovery'}
                   </Text>
                   {exercises.length > 0 && (
@@ -458,7 +466,10 @@ export default function WorkoutsScreen() {
                       <Animated.View
                         key={ex.id || index}
                         entering={FadeInDown.duration(250)}
-                        style={styles.exerciseItem}
+                        style={[
+                          styles.exerciseItem,
+                          index < visibleExercises.length - 1 && styles.exerciseItemDivider,
+                        ]}
                       >
                         <View style={[styles.exerciseIndexBadge, isDone && styles.exerciseIndexDone]}>
                           {isDone ? (
@@ -468,8 +479,11 @@ export default function WorkoutsScreen() {
                           )}
                         </View>
                         <View style={styles.exerciseNameCol}>
-                          <Text style={styles.exerciseNameText} numberOfLines={1}>
+                          <Text style={styles.exerciseNameText} numberOfLines={2}>
                             {displayName}
+                          </Text>
+                          <Text style={styles.exerciseDetailText} numberOfLines={1}>
+                            {formatRest(ex.rest_seconds)} rest between sets
                           </Text>
                           {isSwapped && <Text style={styles.swappedTag}>Swapped</Text>}
                         </View>
@@ -538,10 +552,14 @@ export default function WorkoutsScreen() {
               {exercises.length > 0 && !isDone ? (
                 <>
                   <Button
-                    title="Start & log this workout"
+                    title={hasActiveDraft ? 'Resume workout' : 'Start workout'}
                     icon={<Dumbbell size={18} color="#FFFFFF" />}
                     iconPosition="left"
-                    onPress={() => router.push({ pathname: '/workout/log', params: { plan: '1' } })}
+                    onPress={() =>
+                      hasActiveDraft
+                        ? router.push({ pathname: '/workout/log', params: { resume: '1' } })
+                        : router.push({ pathname: '/workout/log', params: { plan: '1' } })
+                    }
                     style={styles.todayAction}
                   />
                   <View style={styles.todayQuickActionsRow}>
@@ -1188,50 +1206,32 @@ function OpenDayRow({
   const styles = useStyles();
 
   return (
-    <Card style={styles.historyCard}>
-      <View style={styles.historyRow}>
-        <PressableScale
-          onPress={onPress}
-          scaleTo={0.99}
-          accessibilityHint="Opens day options"
-          style={styles.historyMainPressable}
-        >
-          <View style={styles.dateTile}>
-            <Text style={styles.dateTileMonth}>
-              {date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}
-            </Text>
-            <Text style={styles.dateTileDay}>{date.getDate()}</Text>
-            {programDayNum ? (
-              <View style={styles.dateTileProgramBadge}>
-                <Text style={styles.dateTileProgramText}>D{programDayNum}</Text>
-              </View>
-            ) : null}
-          </View>
-          <View style={styles.historyInfo}>
-            <View style={styles.historyBadgeRow}>
-              <Badge label="Open Day" tone="slate" />
-              {programDayNum ? (
-                <Text style={styles.dayInlineTag}>Day {programDayNum}</Text>
-              ) : null}
-            </View>
-            <Text style={styles.historyTitle} numberOfLines={1}>
-              No Workout Logged
-            </Text>
-            <Text style={styles.historyMeta} numberOfLines={1}>
-              {formatDayLabel(dateKey)} · Tap to record or mark rest
-            </Text>
-          </View>
-        </PressableScale>
-        <PressableScale
-          onPress={onLogWorkout}
-          style={styles.logPillBtnSecondary}
-          accessibilityLabel={`Log workout for ${formatShortDay(dateKey)}`}
-        >
-          <Plus size={13} color={colors.primaryLight} strokeWidth={2.6} />
-          <Text style={styles.logPillBtnSecondaryText}>Log</Text>
-        </PressableScale>
-      </View>
-    </Card>
+    <View style={styles.openDayRow}>
+      <PressableScale
+        onPress={onPress}
+        scaleTo={0.99}
+        accessibilityHint="Opens day options"
+        style={styles.historyMainPressable}
+      >
+        <View style={styles.openDayDateCol}>
+          <Text style={styles.openDayDateText}>
+            {date.toLocaleDateString('en-US', { month: 'short' })} {date.getDate()}
+          </Text>
+          {programDayNum ? <Text style={styles.openDayDayNum}>D{programDayNum}</Text> : null}
+        </View>
+        <Text style={styles.openDayMeta} numberOfLines={1}>
+          No workout logged · Tap to record or mark rest
+        </Text>
+      </PressableScale>
+      <PressableScale
+        onPress={onLogWorkout}
+        style={styles.logPillBtnSecondary}
+        accessibilityLabel={`Log workout for ${formatShortDay(dateKey)}`}
+      >
+        <Plus size={13} color={colors.primaryLight} strokeWidth={2.6} />
+        <Text style={styles.logPillBtnSecondaryText}>Log</Text>
+      </PressableScale>
+    </View>
   );
 }
 
@@ -1324,15 +1324,22 @@ const useStyles = makeStyles(({ colors }) => ({
   },
   summaryRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  summaryTile: {
-    flex: 1,
+    alignItems: 'stretch',
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+  },
+  summaryDivider: {
+    width: 1,
+    backgroundColor: colors.border,
+    marginVertical: 2,
+  },
+  summaryTile: {
+    flex: 1,
+    paddingHorizontal: spacing.sm,
   },
   summaryTopRow: {
     flexDirection: 'row',
@@ -1409,7 +1416,7 @@ const useStyles = makeStyles(({ colors }) => ({
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 5,
     borderRadius: radius.full,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
   },
   dayOptionsBtnText: {
     fontSize: 12,
@@ -1448,7 +1455,7 @@ const useStyles = makeStyles(({ colors }) => ({
     width: 48,
     height: 48,
     borderRadius: radius.lg,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1465,6 +1472,11 @@ const useStyles = makeStyles(({ colors }) => ({
     alignItems: 'center',
     gap: spacing.md,
     minHeight: 44,
+    paddingVertical: spacing.xs,
+  },
+  exerciseItemDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
   },
   exerciseIndexBadge: {
     width: 28,
@@ -1477,7 +1489,7 @@ const useStyles = makeStyles(({ colors }) => ({
     justifyContent: 'center',
   },
   exerciseIndexDone: {
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
     borderColor: colors.borderGlow,
   },
   exerciseIndexText: {
@@ -1492,6 +1504,11 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 15,
     fontWeight: '600',
     color: colors.textPrimary,
+  },
+  exerciseDetailText: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   swappedTag: {
     fontSize: 10,
@@ -1508,7 +1525,7 @@ const useStyles = makeStyles(({ colors }) => ({
     width: 28,
     height: 28,
     borderRadius: radius.full,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1541,7 +1558,7 @@ const useStyles = makeStyles(({ colors }) => ({
     minHeight: 44,
     marginTop: spacing.xs,
     borderRadius: radius.md,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
   },
   showMoreText: {
     fontSize: 13,
@@ -1625,7 +1642,7 @@ const useStyles = makeStyles(({ colors }) => ({
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: radius.full,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
   },
   backTodayText: {
     fontSize: 11,
@@ -1718,7 +1735,7 @@ const useStyles = makeStyles(({ colors }) => ({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: colors.primarySurface,
+    backgroundColor: colors.tealTint,
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 6,
     borderRadius: radius.full,
@@ -1735,6 +1752,33 @@ const useStyles = makeStyles(({ colors }) => ({
     color: colors.textMuted,
     fontWeight: '600',
     marginTop: 2,
+  },
+  openDayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  openDayDateCol: {
+    width: 72,
+  },
+  openDayDateText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  openDayDayNum: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  openDayMeta: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.textMuted,
   },
   historyActionsRow: {
     flexDirection: 'row',
@@ -1763,4 +1807,10 @@ function formatShortDay(key: string): string {
   if (parts.length !== 3) return key;
   const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatRest(seconds?: number | null): string {
+  if (!seconds || seconds < 60) return `${seconds || 0}s`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes}m`;
 }

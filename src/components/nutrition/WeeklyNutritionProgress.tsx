@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
+import { View, Text } from 'react-native';
+import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
 import {
   ChevronLeft,
   ChevronRight,
@@ -19,11 +19,12 @@ import {
   Sparkles,
   History,
 } from 'lucide-react-native';
-import { Card, Badge, Button, PressableScale, ProgressBar } from '../ui';
+import { Card, Badge, PressableScale, ProgressBar } from '../ui';
 import { NutritionHeroCard } from './NutritionHeroCard';
-import { radius, spacing, makeStyles, useTheme } from '../../theme';
+import { WeeklyCalorieBars } from './WeeklyCalorieBars';
+import { radius, spacing, motion, makeStyles, useTheme } from '../../theme';
 import { formatNumber } from '../../types';
-import type { MacroTarget, NutritionHistoryDay, WeeklyNutritionDayItem, WeeklyNutritionSummary } from '../../types';
+import type { MacroTarget, NutritionHistoryDay, WeeklyNutritionSummary } from '../../types';
 import { calculateMacroRatio, computeWeeklyNutritionSummaries } from '../../lib/nutritionWeeks';
 import { formatDayLabel, toDateKey } from '../../lib/format';
 import { haptics } from '../../lib/haptics';
@@ -63,6 +64,9 @@ export function WeeklyNutritionProgress({
 
   // Active week summary
   const [entriesLimit, setEntriesLimit] = useState<5 | 7>(5);
+  // The 7-day bar chart gives the at-a-glance view; the full per-day list is detail
+  // most people don't need open by default, so it starts collapsed.
+  const [showDailyLogs, setShowDailyLogs] = useState(false);
 
   const activeWeek: WeeklyNutritionSummary | undefined = weeks[selectedWeekIndex] || weeks[0];
 
@@ -96,9 +100,6 @@ export function WeeklyNutritionProgress({
     copilot_insight,
     days,
   } = safeWeek;
-
-  // Find maximum calorie day for the bar chart scaling
-  const maxDayCalories = Math.max(target_calories * 1.25, ...days.map((d) => d.total_calories), 2400);
 
   const visibleDays = useMemo(() => {
     if (entriesLimit === 7) return days;
@@ -387,8 +388,9 @@ export function WeeklyNutritionProgress({
         </NutritionHeroCard>
       </Animated.View>
 
-      {/* 3. Daily Nutrient Averages Grid (Protein, Carbs, Fat, Water) */}
+      {/* 3. Daily Nutrient Averages + Caloric Ratio — one consolidated card instead of two */}
       <Animated.View entering={enter(3)}>
+        <Card style={styles.nutrientBreakdownCard}>
         <Text style={styles.subSectionTitle}>Average Daily Macro Intake</Text>
         <View style={styles.macroGrid}>
           {/* Protein */}
@@ -480,160 +482,95 @@ export function WeeklyNutritionProgress({
             </Text>
           </View>
         </View>
+
+        <View style={styles.ratioDivider} />
+
+        <View style={styles.ratioHeader}>
+          <Text style={styles.ratioTitle}>Average Calorie Breakdown</Text>
+          <Text style={styles.ratioSub}>Energy contribution</Text>
+        </View>
+
+        {/* Stacked Horizontal Bar */}
+        <View style={styles.stackedBar}>
+          <View style={[styles.stackedSegment, { flex: macroRatios.proteinPct, backgroundColor: colors.cyan }]} />
+          <View style={[styles.stackedSegment, { flex: macroRatios.carbsPct, backgroundColor: colors.amber }]} />
+          <View style={[styles.stackedSegment, { flex: macroRatios.fatPct, backgroundColor: colors.violet }]} />
+        </View>
+
+        {/* Legend */}
+        <View style={styles.ratioLegend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: colors.cyan }]} />
+            <Text style={styles.legendText}>
+              Protein: <Text style={styles.legendBold}>{macroRatios.proteinPct}%</Text>
+            </Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: colors.amber }]} />
+            <Text style={styles.legendText}>
+              Carbs: <Text style={styles.legendBold}>{macroRatios.carbsPct}%</Text>
+            </Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: colors.violet }]} />
+            <Text style={styles.legendText}>
+              Fat: <Text style={styles.legendBold}>{macroRatios.fatPct}%</Text>
+            </Text>
+          </View>
+        </View>
+        </Card>
       </Animated.View>
 
-      {/* 4. Caloric Macro Ratio Bar */}
+      {/* 4. 7-Day Calorie Bar Chart — the at-a-glance weekly trend view */}
       <Animated.View entering={enter(4)}>
-        <Card style={styles.ratioCard}>
-          <View style={styles.ratioHeader}>
-            <Text style={styles.ratioTitle}>Average Calorie Breakdown</Text>
-            <Text style={styles.ratioSub}>Energy contribution</Text>
-          </View>
-
-          {/* Stacked Horizontal Bar */}
-          <View style={styles.stackedBar}>
-            <View style={[styles.stackedSegment, { flex: macroRatios.proteinPct, backgroundColor: colors.cyan }]} />
-            <View style={[styles.stackedSegment, { flex: macroRatios.carbsPct, backgroundColor: colors.amber }]} />
-            <View style={[styles.stackedSegment, { flex: macroRatios.fatPct, backgroundColor: colors.violet }]} />
-          </View>
-
-          {/* Legend */}
-          <View style={styles.ratioLegend}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: colors.cyan }]} />
-              <Text style={styles.legendText}>
-                Protein: <Text style={styles.legendBold}>{macroRatios.proteinPct}%</Text>
-              </Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: colors.amber }]} />
-              <Text style={styles.legendText}>
-                Carbs: <Text style={styles.legendBold}>{macroRatios.carbsPct}%</Text>
-              </Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: colors.violet }]} />
-              <Text style={styles.legendText}>
-                Fat: <Text style={styles.legendBold}>{macroRatios.fatPct}%</Text>
-              </Text>
-            </View>
-          </View>
-        </Card>
+        <WeeklyCalorieBars
+          days={days}
+          targetCalories={target_calories}
+          selectedDate={selectedDate}
+          isCut={isCut}
+          isBulk={isBulk}
+          onSelectDate={onSelectDate}
+        />
       </Animated.View>
 
-      {/* 5. 7-Day Calorie Bar Chart */}
-      <Animated.View entering={enter(5)}>
-        <Card style={styles.chartCard}>
-          <View style={styles.chartHeader}>
-            <View>
-              <Text style={styles.chartTitle}>7-Day Calorie Breakdown</Text>
-              <Text style={styles.chartSubtitle}>Tap any bar to inspect or log meals</Text>
-            </View>
-            <View style={styles.chartTargetLegend}>
-              <View style={styles.dashedTargetLegend} />
-              <Text style={styles.chartTargetLegendText}>Target: {formatNumber(target_calories)} kcal</Text>
-            </View>
+      {/* 5. Day-by-Day Adherence List — collapsed by default; the bar chart above already
+          gives the at-a-glance read, so the full per-day breakdown is progressive disclosure. */}
+      <Animated.View entering={enter(5)} layout={LinearTransition.duration(motion.normal)}>
+        <PressableScale
+          haptic="selection"
+          onPress={() => {
+            haptics.selection();
+            setShowDailyLogs((v) => !v);
+          }}
+          style={styles.dailyLogsToggleRow}
+          accessibilityLabel={showDailyLogs ? 'Hide daily breakdown' : 'Show daily breakdown'}
+          accessibilityHint="Toggles the detailed day-by-day nutrition list for this week"
+        >
+          <View style={styles.historyTitleRow}>
+            <History size={16} color={colors.primaryLight} />
+            <Text style={styles.subSectionTitle}>Daily Breakdown</Text>
           </View>
-
-          {/* Bars Container */}
-          <View style={styles.barsContainer}>
-            {/* Target Line overlay */}
-            <View
-              style={[
-                styles.chartTargetLine,
-                {
-                  bottom: Math.min(130, Math.max(20, (target_calories / maxDayCalories) * 130)) + 30,
-                },
-              ]}
+          <View style={styles.dailyLogsToggleRight}>
+            <Badge
+              label={`${logged_count}/7 logged`}
+              tone={logged_count >= 5 ? 'emerald' : logged_count > 0 ? 'amber' : 'slate'}
             />
-
-            {days.map((dayItem) => {
-              const isSelected = dayItem.date === selectedDate;
-              const hasLogged = dayItem.has_logged;
-              const cal = dayItem.total_calories;
-              const barHeight = hasLogged ? Math.min(130, Math.max(8, (cal / maxDayCalories) * 130)) : 4;
-
-              let barColor = colors.primaryLight;
-              if (!hasLogged) {
-                barColor = colors.track;
-              } else if (isCut) {
-                barColor = cal <= target_calories ? colors.primaryLight : colors.warning;
-              } else if (isBulk) {
-                barColor = cal >= target_calories ? colors.success : colors.amber;
-              }
-
-              return (
-                <PressableScale
-                  key={dayItem.date}
-                  onPress={() => {
-                    haptics.selection();
-                    onSelectDate(dayItem.date);
-                  }}
-                  style={[styles.barCol, isSelected && styles.barColSelected]}
-                  accessibilityLabel={`${dayItem.weekday}, ${dayItem.date}: ${cal} calories. ${hasLogged ? 'Logged' : 'No entries'}`}
-                >
-                  {/* Calorie text above bar */}
-                  <Text style={[styles.barCalText, isSelected && { color: colors.primaryLight, fontWeight: '800' }]}>
-                    {hasLogged ? (cal >= 1000 ? `${(cal / 1000).toFixed(1)}k` : cal) : '-'}
-                  </Text>
-
-                  {/* Vertical Bar */}
-                  <View style={styles.barTrack}>
-                    <View
-                      style={[
-                        styles.barFill,
-                        {
-                          height: barHeight,
-                          backgroundColor: barColor,
-                          borderTopLeftRadius: 4,
-                          borderTopRightRadius: 4,
-                        },
-                        isSelected && {
-                          borderColor: '#FFFFFF',
-                          borderWidth: 1,
-                        },
-                      ]}
-                    />
-                  </View>
-
-                  {/* Day of Week & Date */}
-                  <View style={[styles.dayLabelPill, dayItem.is_today && styles.dayLabelPillToday]}>
-                    <Text
-                      style={[
-                        styles.barWeekday,
-                        dayItem.is_today && { color: colors.primaryLight, fontWeight: '800' },
-                        isSelected && { color: colors.textPrimary, fontWeight: '800' },
-                      ]}
-                    >
-                      {dayItem.weekday.charAt(0)}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.barDayNumber,
-                        dayItem.is_today && { color: colors.primaryLight, fontWeight: '800' },
-                        isSelected && { color: colors.textPrimary, fontWeight: '800' },
-                      ]}
-                    >
-                      {dayItem.day_number}
-                    </Text>
-                  </View>
-                </PressableScale>
-              );
-            })}
+            {showDailyLogs ? (
+              <ChevronUp size={18} color={colors.textMuted} />
+            ) : (
+              <ChevronDown size={18} color={colors.textMuted} />
+            )}
           </View>
-        </Card>
-      </Animated.View>
+        </PressableScale>
 
-      {/* 6. Day-by-Day Adherence List */}
-      <Animated.View entering={enter(6)}>
+        {showDailyLogs && (
+        <Animated.View
+          entering={FadeInDown.duration(motion.normal)}
+          exiting={FadeOut.duration(motion.fast)}
+          layout={LinearTransition.duration(motion.normal)}
+        >
         <View style={styles.historySectionHeader}>
           <View style={{ flex: 1 }}>
-            <View style={styles.historyTitleRow}>
-              <History size={16} color={colors.primaryLight} />
-              <Text style={styles.subSectionTitle}>
-                {selectedWeekIndex === 0 ? 'Daily Logs for this Week' : `Daily Logs · ${activeWeek.label}`}
-              </Text>
-            </View>
             <Text style={styles.historySubhead}>
               {entriesLimit === 5 ? 'Showing latest 5 entries' : 'Showing all 7 entries'} · {activeWeek.label}
             </Text>
@@ -810,6 +747,8 @@ export function WeeklyNutritionProgress({
             </PressableScale>
           </View>
         </Card>
+        </Animated.View>
+        )}
       </Animated.View>
     </View>
   );
@@ -1067,10 +1006,15 @@ const useStyles = makeStyles(({ colors }) => ({
     marginTop: 4,
     textAlign: 'right',
   },
-  ratioCard: {
+  nutrientBreakdownCard: {
     padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  ratioDivider: {
+    height: 1,
+    backgroundColor: colors.borderSubtle,
+    marginVertical: spacing.md,
   },
   ratioHeader: {
     flexDirection: 'row',
@@ -1123,112 +1067,6 @@ const useStyles = makeStyles(({ colors }) => ({
   legendBold: {
     fontWeight: '800',
     color: colors.textPrimary,
-  },
-  chartCard: {
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  chartHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.md,
-  },
-  chartTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  chartSubtitle: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: colors.textMuted,
-    marginTop: 1,
-  },
-  chartTargetLegend: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  dashedTargetLegend: {
-    width: 14,
-    height: 2,
-    backgroundColor: colors.primaryLight,
-    borderRadius: 1,
-  },
-  chartTargetLegendText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.primaryLight,
-  },
-  barsContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    height: 175,
-    paddingTop: spacing.md,
-    position: 'relative',
-  },
-  chartTargetLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-    borderStyle: 'dashed',
-    borderWidth: 1,
-    borderColor: colors.primaryLight,
-    opacity: 0.6,
-    zIndex: 1,
-  },
-  barCol: {
-    flex: 1,
-    alignItems: 'center',
-    height: '100%',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 2,
-    zIndex: 2,
-  },
-  barColSelected: {
-    backgroundColor: colors.primarySurface,
-    borderRadius: radius.md,
-  },
-  barCalText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.textMuted,
-    marginBottom: 4,
-  },
-  barTrack: {
-    width: 18,
-    height: 130,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 4,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  barFill: {
-    width: '100%',
-  },
-  dayLabelPill: {
-    alignItems: 'center',
-    marginTop: 6,
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    borderRadius: radius.sm,
-  },
-  dayLabelPillToday: {
-    backgroundColor: colors.primarySurface,
-  },
-  barWeekday: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  barDayNumber: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.textMuted,
   },
   daysListCard: {
     padding: 0,
@@ -1360,12 +1198,28 @@ const useStyles = makeStyles(({ colors }) => ({
     fontWeight: '700',
     color: colors.primaryLight,
   },
+  dailyLogsToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+  },
+  dailyLogsToggleRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   historySectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.xs + 2,
-    marginTop: spacing.xs,
+    marginTop: spacing.md,
     gap: spacing.sm,
   },
   historyTitleRow: {

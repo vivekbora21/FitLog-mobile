@@ -1,4 +1,4 @@
-import { radius, spacing, makeStyles } from '../../src/theme';
+import { radius, spacing, makeStyles } from '../../theme';
 
 export const useStyles = makeStyles(({ colors }) => ({
   center: {

@@ -1,7 +1,16 @@
-import React from 'react';
-import { View, Text, Modal, StyleSheet, Pressable } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, Modal, StyleSheet, Pressable, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Dumbbell, Utensils, ChevronRight } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  FadeInDown,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { Dumbbell, Utensils, Scale, Camera, ChevronRight } from 'lucide-react-native';
 import { PressableScale } from '../ui/PressableScale';
 import { radius, spacing, makeStyles, useTheme } from '../../theme';
 import { toDateKey } from '../../lib/format';
@@ -11,72 +20,144 @@ interface QuickAddSheetProps {
   onClose: () => void;
 }
 
+const SHEET_SPRING = { damping: 18, stiffness: 180, mass: 0.9 };
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+
 export function QuickAddSheet({ visible, onClose }: QuickAddSheetProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const todayKey = toDateKey(new Date());
 
-  const handleLogWorkout = () => {
-    onClose();
-    router.push('/workout/log');
-  };
+  // Rendered while visible, and for the short tail of the close animation.
+  const [rendered, setRendered] = useState(visible);
+  const progress = useSharedValue(0);
 
-  const handleAddMeal = () => {
-    onClose();
-    router.push({ pathname: '/meal/add', params: { date: todayKey } });
-  };
+  useEffect(() => {
+    if (visible) {
+      // Mount tracks `visible` becoming true; close (below) unmounts only after the exit animation finishes.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRendered(true);
+      progress.value = withSpring(1, SHEET_SPRING);
+    } else {
+      progress.value = withTiming(0, { duration: 180 }, (finished) => {
+        if (finished) runOnJS(setRendered)(false);
+      });
+    }
+  }, [visible, progress]);
+
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - progress.value) * SCREEN_HEIGHT }],
+  }));
+
+  const actions = [
+    {
+      key: 'workout',
+      label: 'Log workout',
+      sub: 'Record sets, reps & weights',
+      icon: Dumbbell,
+      iconColor: colors.primaryLight,
+      iconBg: colors.primarySurface,
+      onPress: () => {
+        onClose();
+        router.push('/workout/log');
+      },
+    },
+    {
+      key: 'meal',
+      label: 'Add meal',
+      sub: 'Log food & track macros',
+      icon: Utensils,
+      iconColor: colors.cyan,
+      iconBg: colors.cyanGlow,
+      onPress: () => {
+        onClose();
+        router.push({ pathname: '/meal/add', params: { date: todayKey } });
+      },
+    },
+    {
+      key: 'weight',
+      label: 'Log weight',
+      sub: 'Track your latest check-in',
+      icon: Scale,
+      iconColor: colors.amber,
+      iconBg: colors.amberGlow,
+      onPress: () => {
+        onClose();
+        router.push({ pathname: '/(tabs)/progress', params: { quickAdd: 'weight' } });
+      },
+    },
+    {
+      key: 'photo',
+      label: 'Add photo',
+      sub: 'Capture a new progress photo',
+      icon: Camera,
+      iconColor: colors.rose,
+      iconBg: colors.roseGlow,
+      onPress: () => {
+        onClose();
+        router.push({ pathname: '/(tabs)/progress', params: { quickAdd: 'photo' } });
+      },
+    },
+  ];
+
+  if (!rendered) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
       <View style={styles.backdrop}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.dim, backdropStyle]} />
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
-        <View style={styles.sheetContainer}>
-          <View style={styles.handleBar} />
-          <Text style={styles.title}>Quick add</Text>
-
-          <PressableScale
-            haptic="selection"
-            onPress={handleLogWorkout}
-            style={styles.row}
-            accessibilityLabel="Log workout"
+        <View style={styles.sheetSlot} pointerEvents="box-none">
+          <Animated.View
+            style={[
+              styles.sheetContainer,
+              sheetStyle,
+              { paddingBottom: spacing.lg + Math.max(insets.bottom, spacing.lg) },
+            ]}
           >
-            <View style={[styles.iconCircle, { backgroundColor: colors.primarySurface }]}>
-              <Dumbbell size={20} color={colors.primaryLight} />
-            </View>
-            <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Log workout</Text>
-              <Text style={styles.rowSub}>Record sets, reps & weights</Text>
-            </View>
-            <ChevronRight size={18} color={colors.textMuted} />
-          </PressableScale>
+            <View style={styles.handleBar} />
+            <Text style={styles.title}>Quick add</Text>
 
-          <PressableScale
-            haptic="selection"
-            onPress={handleAddMeal}
-            style={styles.row}
-            accessibilityLabel="Add meal"
-          >
-            <View style={[styles.iconCircle, { backgroundColor: colors.cyanGlow }]}>
-              <Utensils size={20} color={colors.cyan} />
-            </View>
-            <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Add meal</Text>
-              <Text style={styles.rowSub}>Log food & track macros</Text>
-            </View>
-            <ChevronRight size={18} color={colors.textMuted} />
-          </PressableScale>
+            {actions.map(({ key, label, sub, icon: Icon, iconColor, iconBg, onPress }, index) => (
+              <Animated.View key={key} entering={FadeInDown.delay(60 + index * 45).springify().damping(16)}>
+                <PressableScale
+                  haptic="selection"
+                  onPress={onPress}
+                  style={styles.row}
+                  accessibilityLabel={label}
+                  accessibilityRole="button"
+                >
+                  <View style={[styles.iconCircle, { backgroundColor: iconBg }]}>
+                    <Icon size={20} color={iconColor} />
+                  </View>
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle}>{label}</Text>
+                    <Text style={styles.rowSub}>{sub}</Text>
+                  </View>
+                  <ChevronRight size={18} color={colors.textMuted} />
+                </PressableScale>
+              </Animated.View>
+            ))}
+          </Animated.View>
         </View>
       </View>
     </Modal>
   );
 }
 
-const useStyles = makeStyles(({ colors }) => ({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   backdrop: {
     flex: 1,
+  },
+  dim: {
     backgroundColor: 'rgba(0,0,0,0.65)',
+  },
+  sheetSlot: {
+    flex: 1,
     justifyContent: 'flex-end',
   },
   sheetContainer: {
@@ -85,8 +166,8 @@ const useStyles = makeStyles(({ colors }) => ({
     borderTopRightRadius: radius.xl,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xs,
-    paddingBottom: spacing.xl + spacing.lg,
     gap: spacing.sm,
+    ...shadows.elevated,
   },
   handleBar: {
     width: 36,
@@ -101,7 +182,7 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 18,
     fontWeight: '800',
     color: colors.textPrimary,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   row: {
     flexDirection: 'row',

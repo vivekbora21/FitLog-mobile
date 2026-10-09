@@ -287,7 +287,9 @@ export function exercisesFromSession(session: WorkoutSession): DraftExercise[] {
         type: s.set_type ?? 'NORMAL',
         weight: s.weight_kg ? String(s.weight_kg) : '',
         reps: s.reps ? String(s.reps) : '',
-        durationMinutes: s.duration_seconds ? String(Math.round(s.duration_seconds / 60)) : '',
+        // One decimal place (6s resolution) instead of a whole minute, so resuming/editing
+        // a session doesn't round e.g. 2:05 down to 2:00.
+        durationMinutes: s.duration_seconds ? String(Math.round((s.duration_seconds / 60) * 10) / 10) : '',
         incline: s.incline_percent !== null && s.incline_percent !== undefined ? String(s.incline_percent) : '',
         speedKmh: s.speed_kmh !== null && s.speed_kmh !== undefined ? String(s.speed_kmh) : '',
         resistance: s.resistance_level !== null && s.resistance_level !== undefined ? String(s.resistance_level) : '',
@@ -329,4 +331,31 @@ export function clearWorkoutDraft(): void {
 
 export function draftHasContent(d: Pick<WorkoutDraft, 'exercises' | 'title' | 'notes'>): boolean {
   return d.exercises.length > 0 || d.title.trim().length > 0 || d.notes.trim().length > 0;
+}
+
+// In-memory only: a dismissed banner should resurface the next time the app is opened,
+// not be forgotten forever like a deleted draft.
+let dismissedDraft: { startedAt: number; updatedAt: number } | null = null;
+
+/**
+ * Hides the resume banner for this draft until the app restarts. Keyed on `updatedAt` as
+ * well as `startedAt`: if the user later resumes the draft and keeps logging (bumping
+ * `updatedAt`), the dismissal is treated as stale and the banner resurfaces, since it now
+ * represents work done after the user last chose to hide it.
+ */
+export function dismissWorkoutDraftForSession(draft: Pick<WorkoutDraft, 'startedAt' | 'updatedAt'>): void {
+  dismissedDraft = { startedAt: draft.startedAt, updatedAt: draft.updatedAt };
+}
+
+export function isWorkoutDraftDismissedForSession(draft: Pick<WorkoutDraft, 'startedAt' | 'updatedAt'>): boolean {
+  return !!dismissedDraft && dismissedDraft.startedAt === draft.startedAt && dismissedDraft.updatedAt >= draft.updatedAt;
+}
+
+/** "Started just now" / "Started 45m ago" / "Started 2h ago" — how long a draft has existed. */
+export function formatDraftAge(startedAt: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - startedAt) / 60_000));
+  if (minutes < 1) return 'Started just now';
+  if (minutes < 60) return `Started ${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return `Started ${hours}h ago`;
 }

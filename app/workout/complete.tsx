@@ -10,7 +10,7 @@ import { useTheme } from '../../src/theme';
 import { formatDuration, formatVolume } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
-import { useStyles } from './complete.styles';
+import { useStyles } from '../../src/features/workout/complete.styles';
 
 const RATING_OPTIONS = [
   { value: 4, label: 'Too Easy' },

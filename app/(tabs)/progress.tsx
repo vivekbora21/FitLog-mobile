@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,22 +6,11 @@ import {
   RefreshControl,
   Alert,
   TextInput,
-  LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Animated, { FadeIn, FadeInDown, FadeOut, LinearTransition, runOnJS } from 'react-native-reanimated';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
-import Svg, {
-  Defs,
-  LinearGradient,
-  Stop,
-  Path,
-  Circle,
-  Line,
-  Text as SvgText,
-} from 'react-native-svg';
 import {
   Scale,
   Trophy,
@@ -40,12 +29,14 @@ import {
   Camera,
   Sparkles,
   Flame,
+  Award,
 } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { api, extractErrorMessage } from '../../src/api/client';
 import { NutritionProgressSection } from '../../src/components/progress/NutritionProgressSection';
 import { CalorieBurnSection } from '../../src/components/progress/CalorieBurnSection';
 import { ProgressPhotoGallery } from '../../src/components/progress/ProgressPhotoGallery';
+import { AchievementsSection } from '../../src/components/progress/AchievementsSection';
 import {
   PrCelebrationModal,
   type PrCelebrationData,
@@ -56,18 +47,20 @@ import {
   Card,
   EmptyState,
   Input,
+  PeriodFilter,
   PressableScale,
   ScreenHeader,
 } from '../../src/components/ui';
+import { LineChart, type LineChartMode } from '../../src/components/charts';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
-import { radius, spacing, useTheme } from '../../src/theme';
+import { useTheme } from '../../src/theme';
 import { useStyles } from '../../src/components/progress/progress.styles';
 import { formatDayLabel, parseNumberInput, toDateKey } from '../../src/lib/format';
 import { haptics } from '../../src/lib/haptics';
 import { useAuth } from '../../src/providers/auth';
 import type { BodyMeasurement, PersonalRecord, WeightEntry } from '../../src/types';
 
-type TabKey = 'WEIGHT' | 'PHOTOS' | 'NUTRITION' | 'BURN' | 'MEASUREMENTS' | 'PRS';
+type TabKey = 'WEIGHT' | 'PHOTOS' | 'NUTRITION' | 'BURN' | 'MEASUREMENTS' | 'PRS' | 'ACHIEVEMENTS';
 
 const TABS: { key: TabKey; label: string; icon: typeof Scale }[] = [
   { key: 'WEIGHT', label: 'Weight', icon: Scale },
@@ -76,6 +69,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Scale }[] = [
   { key: 'BURN', label: 'Activity', icon: Flame },
   { key: 'MEASUREMENTS', label: 'Measurements', icon: Ruler },
   { key: 'PRS', label: 'Records', icon: Trophy },
+  { key: 'ACHIEVEMENTS', label: 'Achievements', icon: Award },
 ];
 
 const MUSCLE_FILTERS = ['All', 'Chest', 'Back', 'Legs', 'Shoulders', 'Arms'];
@@ -122,7 +116,8 @@ export default function ProgressScreen() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabKey>('WEIGHT');
+  const { quickAdd } = useLocalSearchParams<{ quickAdd?: string }>();
+  const [activeTab, setActiveTab] = useState<TabKey>(() => (quickAdd === 'photo' ? 'PHOTOS' : 'WEIGHT'));
 
   // Queries
   const {
@@ -212,7 +207,8 @@ export default function ProgressScreen() {
   };
 
   // Weight Logging State
-  const [isLoggingWeight, setIsLoggingWeight] = useState(false);
+  // Jump straight into logging when arriving from the Quick Add sheet.
+  const [isLoggingWeight, setIsLoggingWeight] = useState(() => quickAdd === 'weight');
   const [newWeight, setNewWeight] = useState('');
   const [weightDate, setWeightDate] = useState(() => toDateKey(new Date()));
 
@@ -431,6 +427,7 @@ export default function ProgressScreen() {
           eyebrow="Analytics & History"
           title="Progress"
           right={
+            activeTab === 'ACHIEVEMENTS' ? undefined : (
             <PressableScale
                 haptic="selection"
                 onPress={() => {
@@ -461,6 +458,7 @@ export default function ProgressScreen() {
               >
                 <Plus size={20} color="#FFFFFF" strokeWidth={2.4} />
               </PressableScale>
+            )
           }
         />
 
@@ -531,6 +529,7 @@ export default function ProgressScreen() {
             isLoading={isPhotosLoading}
             onRefresh={refetchPhotos}
             currentWeight={currentWeight}
+            autoOpenUpload={quickAdd === 'photo'}
           />
         )}
 
@@ -576,6 +575,15 @@ export default function ProgressScreen() {
             setPrDate={setPrDate}
             onSavePr={() => logPrMutation.mutate()}
             isSavingPr={logPrMutation.isPending}
+          />
+        )}
+
+        {activeTab === 'ACHIEVEMENTS' && (
+          <AchievementsSection
+            dashboardStats={dashboardStats}
+            prs={prs}
+            nutritionHistory={nutritionHistory}
+            isLoading={isPrsLoading && !dashboardStats}
           />
         )}
 
@@ -673,6 +681,8 @@ function WeightSection({
   const styles = useStyles();
   const router = useRouter();
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [timeframe, setTimeframe] = useState<TimeframeScope>('ALL');
+  const [displayMode, setDisplayMode] = useState<LineChartMode>('both');
   const visibleWeights = showAllHistory
     ? recentWeights
     : recentWeights.slice(0, HISTORY_PAGE_SIZE);
@@ -682,6 +692,46 @@ function WeightSection({
     if (trend.length === 0) return null;
     return Math.round(trend[trend.length - 1].trendWeight * 10) / 10;
   }, [chronologicalWeights]);
+
+  // Filter weights according to the selected period-filter scope
+  const scopedWeights = useMemo(() => {
+    if (chronologicalWeights.length === 0) return [];
+    if (timeframe === 'ALL' || chronologicalWeights.length <= 1) return chronologicalWeights;
+    const now = new Date();
+    const daysMap: Record<TimeframeScope, number> = {
+      '1W': 7,
+      '1M': 30,
+      '3M': 90,
+      '6M': 180,
+      '1Y': 365,
+      ALL: 99999,
+    };
+    const cutoffTime = now.getTime() - daysMap[timeframe] * 24 * 60 * 60 * 1000;
+    const filtered = chronologicalWeights.filter((w) => new Date(w.date).getTime() >= cutoffTime);
+    return filtered.length > 0 ? filtered : chronologicalWeights;
+  }, [chronologicalWeights, timeframe]);
+
+  // Trend series shares computeWeightTrend() with the KPI card above so the
+  // "7d Trend" figure never disagrees between the stat row and the chart.
+  const trendPoints = useMemo(() => computeWeightTrend(scopedWeights), [scopedWeights]);
+
+  const weeklyRate = useMemo(() => {
+    if (trendPoints.length < 2) return null;
+    const first = trendPoints[0];
+    const latest = trendPoints[trendPoints.length - 1];
+    const dStart = new Date(first.date).getTime();
+    const dEnd = new Date(latest.date).getTime();
+    const days = Math.max(1, (dEnd - dStart) / (1000 * 60 * 60 * 24));
+    const rate = ((latest.trendWeight - first.trendWeight) / days) * 7;
+    return Math.round(rate * 100) / 100;
+  }, [trendPoints]);
+
+  const chartData = useMemo(
+    () => trendPoints.map((tp) => ({ value: tp.rawWeight, trendValue: tp.trendWeight, date: tp.date })),
+    [trendPoints]
+  );
+
+  const baselineWeight = trendPoints[0]?.rawWeight ?? null;
 
   if (isError) {
     return (
@@ -841,9 +891,97 @@ function WeightSection({
             />
           </View>
 
-          <WeightSvgChart
-            weights={chronologicalWeights}
-            targetWeight={targetWeight}
+          <View style={styles.periodFilterWrap}>
+            <PeriodFilter
+              options={WEIGHT_PERIOD_OPTIONS}
+              value={timeframe}
+              onChange={(v) => setTimeframe(v)}
+              accessibilityLabel="Weight chart period"
+            />
+          </View>
+
+          {trendPoints.length > 0 && (
+            <View style={styles.chartControlBar}>
+              <View style={styles.chartMetricRow}>
+                <View style={styles.chartTrendPill}>
+                  <Text style={styles.chartTrendPillLabel}>
+                    {trendPoints.length === 1 ? 'Current' : '7d Trend'}
+                  </Text>
+                  <Text style={styles.chartTrendPillValue}>
+                    {Math.round(trendPoints[trendPoints.length - 1].trendWeight * 10) / 10} kg
+                  </Text>
+                </View>
+                {weeklyRate != null ? (
+                  <View
+                    style={[
+                      styles.chartRatePill,
+                      weeklyRate < 0
+                        ? styles.pillSuccess
+                        : weeklyRate > 0
+                          ? styles.pillWarning
+                          : styles.pillNeutral,
+                    ]}
+                  >
+                    {weeklyRate < 0 ? (
+                      <TrendingDown size={11} color={colors.primaryLight} strokeWidth={2.5} />
+                    ) : weeklyRate > 0 ? (
+                      <TrendingUp size={11} color={colors.amber} strokeWidth={2.5} />
+                    ) : (
+                      <Minus size={11} color={colors.textMuted} strokeWidth={2.5} />
+                    )}
+                    <Text
+                      style={[
+                        styles.chartRatePillText,
+                        weeklyRate < 0
+                          ? styles.textSuccess
+                          : weeklyRate > 0
+                            ? styles.textWarning
+                            : { color: colors.textMuted },
+                      ]}
+                    >
+                      {weeklyRate > 0 ? `+${weeklyRate}` : `${weeklyRate}`} kg/wk
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={[styles.chartRatePill, styles.pillNeutral]}>
+                    <Text style={[styles.chartRatePillText, { color: colors.textMuted }]}>Baseline</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          <LineChart
+            data={chartData}
+            mode={displayMode}
+            onModeChange={setDisplayMode}
+            targetValue={targetWeight}
+            targetLabel="Target"
+            unit="kg"
+            emptyState={{
+              icon: <Scale size={24} color={colors.textMuted} />,
+              title: 'No weigh-ins logged yet',
+              subtitle: 'Tap "Record Weigh-in" to start your trend trajectory',
+            }}
+            renderTooltipExtra={(point) => {
+              if (baselineWeight == null) return null;
+              const deltaBaseline = Math.round((point.value - baselineWeight) * 10) / 10;
+              if (deltaBaseline === 0) return null;
+              return (
+                <View style={styles.tooltipExtraRow}>
+                  <Text style={styles.tooltipExtraLabel}>Since start</Text>
+                  <Text
+                    style={[
+                      styles.tooltipExtraValue,
+                      deltaBaseline < 0 ? styles.textSuccess : styles.textWarning,
+                    ]}
+                  >
+                    {deltaBaseline > 0 ? `+${deltaBaseline}` : deltaBaseline} kg
+                  </Text>
+                </View>
+              );
+            }}
+            accessibilityLabel="Weight trend chart"
           />
         </Card>
       </Animated.View>
@@ -1012,722 +1150,15 @@ function WeightSection({
 }
 
 type TimeframeScope = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
-const TIMEFRAME_SCOPES: TimeframeScope[] = ['1W', '1M', '3M', '6M', '1Y', 'ALL'];
+const WEIGHT_PERIOD_OPTIONS: { value: TimeframeScope; label: string }[] = [
+  { value: '1W', label: '1W' },
+  { value: '1M', label: '1M' },
+  { value: '3M', label: '3M' },
+  { value: '6M', label: '6M' },
+  { value: '1Y', label: '1Y' },
+  { value: 'ALL', label: 'ALL' },
+];
 
-// Native SVG Line Chart for Weight with Timeframe Scopes, 7-Day EMA Smoothed Trend,
-// Touch Scrubbing with Vertical Cursor Line, and Precise Tooltip Popups
-function WeightSvgChart({
-  weights,
-  targetWeight,
-}: {
-  weights: WeightEntry[];
-  targetWeight: number | null;
-}) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  const [layoutWidth, setLayoutWidth] = useState(320);
-  const [scrubIndex, setScrubIndex] = useState<number | null>(null);
-  const [displayMode, setDisplayMode] = useState<'both' | 'trend' | 'raw'>('both');
-  const [timeframe, setTimeframe] = useState<TimeframeScope>('ALL');
-  const chartHeight = 195;
-  // Asymmetric padding: the plot only needs a couple of px on the left, while the
-  // right side reserves just enough room for the kg axis labels — this lets the
-  // actual line/points use nearly the full card width instead of large dead margins.
-  const paddingLeft = 6;
-  const paddingRight = 34;
-  const paddingTop = 26;
-  const paddingBottom = 32;
-
-  // Filter weights according to selected timeframe scope
-  const scopedWeights = useMemo(() => {
-    if (weights.length === 0) return [];
-    if (timeframe === 'ALL' || weights.length <= 1) return weights;
-    const now = new Date();
-    const daysMap: Record<TimeframeScope, number> = {
-      '1W': 7,
-      '1M': 30,
-      '3M': 90,
-      '6M': 180,
-      '1Y': 365,
-      'ALL': 99999,
-    };
-    const cutoffTime = now.getTime() - daysMap[timeframe] * 24 * 60 * 60 * 1000;
-    const filtered = weights.filter((w) => new Date(w.date).getTime() >= cutoffTime);
-    return filtered.length > 0 ? filtered : weights;
-  }, [weights, timeframe]);
-
-  useEffect(() => {
-    if (scrubIndex == null) return;
-    const timer = setTimeout(() => {
-      setScrubIndex(null);
-    }, 4500);
-    return () => clearTimeout(timer);
-  }, [scrubIndex]);
-
-  const onLayout = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w > 50) setLayoutWidth(w);
-  };
-
-  // Trend series shares computeWeightTrend() with the KPI card above so the
-  // "7d Trend" figure never disagrees between the stat row and the chart.
-  const trendPoints = useMemo(() => computeWeightTrend(scopedWeights), [scopedWeights]);
-
-  const weeklyRate = useMemo(() => {
-    if (trendPoints.length < 2) return null;
-    const first = trendPoints[0];
-    const latest = trendPoints[trendPoints.length - 1];
-    const dStart = new Date(first.date).getTime();
-    const dEnd = new Date(latest.date).getTime();
-    const days = Math.max(1, (dEnd - dStart) / (1000 * 60 * 60 * 24));
-    const rate = ((latest.trendWeight - first.trendWeight) / days) * 7;
-    return Math.round(rate * 100) / 100;
-  }, [trendPoints]);
-
-  const allValues = useMemo(() => {
-    const vals: number[] = [];
-    scopedWeights.forEach((w) => vals.push(w.weight_kg));
-    trendPoints.forEach((p) => vals.push(p.trendWeight));
-    if (targetWeight != null) vals.push(targetWeight);
-    return vals;
-  }, [scopedWeights, trendPoints, targetWeight]);
-
-  const hasValues = allValues.length > 0;
-  const minVal = hasValues ? Math.min(...allValues) : 70;
-  const maxVal = hasValues ? Math.max(...allValues) : 70;
-  const rawSpread = maxVal - minVal;
-  // If only 1 distinct value (or 0 data), provide a ±2.5 kg buffer so the point is centered vertically
-  const paddingMargin = rawSpread < 0.5 ? 2.5 : Math.max(rawSpread * 0.15, 1.5);
-  const chartMin = minVal - paddingMargin;
-  const chartMax = maxVal + paddingMargin;
-  const valRange = Math.max(chartMax - chartMin, 1);
-
-  const innerW = layoutWidth - paddingLeft - paddingRight;
-  const innerH = chartHeight - paddingTop - paddingBottom;
-
-  const points = useMemo(() => {
-    return trendPoints.map((tp, idx) => {
-      const x =
-        paddingLeft +
-        (trendPoints.length === 1 ? innerW / 2 : (idx / (trendPoints.length - 1)) * innerW);
-      const rawY = paddingTop + (1 - (tp.rawWeight - chartMin) / valRange) * innerH;
-      const trendY = paddingTop + (1 - (tp.trendWeight - chartMin) / valRange) * innerH;
-      return {
-        x,
-        rawY,
-        trendY,
-        weight: tp.rawWeight,
-        trend: tp.trendWeight,
-        variance: tp.variance,
-        date: tp.date,
-      };
-    });
-  }, [trendPoints, innerW, innerH, chartMin, valRange]);
-
-  // Trend line path
-  const trendLinePath = useMemo(() => {
-    if (points.length < 2) return '';
-    return points.reduce((acc, pt, i) => {
-      return i === 0 ? `M ${pt.x},${pt.trendY}` : `${acc} L ${pt.x},${pt.trendY}`;
-    }, '');
-  }, [points]);
-
-  // Raw line path
-  const rawLinePath = useMemo(() => {
-    if (points.length < 2) return '';
-    return points.reduce((acc, pt, i) => {
-      return i === 0 ? `M ${pt.x},${pt.rawY}` : `${acc} L ${pt.x},${pt.rawY}`;
-    }, '');
-  }, [points]);
-
-  // Shaded area under trend line
-  const trendAreaPath = useMemo(() => {
-    if (points.length < 2) return '';
-    return `${trendLinePath} L ${points[points.length - 1].x},${
-      chartHeight - paddingBottom
-    } L ${points[0].x},${chartHeight - paddingBottom} Z`;
-  }, [trendLinePath, points]);
-
-  // Target line Y
-  const targetY =
-    targetWeight != null
-      ? paddingTop + (1 - (targetWeight - chartMin) / valRange) * innerH
-      : null;
-
-  const onScrub = useCallback((touchX: number) => {
-    if (points.length === 0) return;
-    let closestIdx = 0;
-    let closestDist = Math.abs(points[0].x - touchX);
-    for (let i = 1; i < points.length; i++) {
-      const dist = Math.abs(points[i].x - touchX);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closestIdx = i;
-      }
-    }
-    setScrubIndex((prev) => {
-      if (prev !== closestIdx) {
-        haptics.selection();
-      }
-      return closestIdx;
-    });
-  }, [points]);
-
-  const composedGesture = useMemo(() => {
-    const panGesture = Gesture.Pan()
-      .onBegin((e) => {
-        'worklet';
-        runOnJS(onScrub)(e.x);
-      })
-      .onUpdate((e) => {
-        'worklet';
-        runOnJS(onScrub)(e.x);
-      });
-
-    const tapGesture = Gesture.Tap()
-      .onEnd((e) => {
-        'worklet';
-        runOnJS(onScrub)(e.x);
-      });
-
-    return Gesture.Race(panGesture, tapGesture);
-  }, [onScrub]);
-
-  const activePoint = scrubIndex != null ? points[scrubIndex] : null;
-
-  const baselineWeight = points[0]?.weight ?? null;
-  const activeDeltaBaseline =
-    activePoint && baselineWeight != null
-      ? Number((activePoint.weight - baselineWeight).toFixed(1))
-      : null;
-
-  const activeDeltaTarget =
-    activePoint && targetWeight != null
-      ? Number((activePoint.weight - targetWeight).toFixed(1))
-      : null;
-
-  return (
-    <Animated.View
-      entering={FadeInDown.duration(350)}
-      onLayout={onLayout}
-      style={styles.chartContainer}
-    >
-      {/* Timeframe Scope Selector */}
-      <View style={styles.timeframeRow}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.timeframeScroller}
-        >
-          <View style={styles.timeframePills}>
-            {TIMEFRAME_SCOPES.map((scope) => {
-              const active = timeframe === scope;
-              return (
-                <PressableScale
-                  key={scope}
-                  haptic="selection"
-                  onPress={() => {
-                    setTimeframe(scope);
-                    setScrubIndex(null);
-                  }}
-                  style={[styles.timeframePill, active && styles.timeframePillActive]}
-                  accessibilityLabel={`Set timeframe to ${scope}`}
-                >
-                  <Text
-                    style={[
-                      styles.timeframePillText,
-                      active && styles.timeframePillTextActive,
-                    ]}
-                  >
-                    {scope}
-                  </Text>
-                </PressableScale>
-              );
-            })}
-          </View>
-        </ScrollView>
-
-        {/* View Mode Switcher (Both, Trend, Raw) */}
-        <View style={styles.chartModeSwitcher}>
-          <PressableScale
-            haptic="selection"
-            onPress={() => setDisplayMode('both')}
-            style={[styles.chartModeBtn, displayMode === 'both' && styles.chartModeBtnActive]}
-            accessibilityLabel="Show trend and raw weigh-ins"
-          >
-            <Text style={[styles.chartModeBtnText, displayMode === 'both' && styles.chartModeBtnTextActive]}>Both</Text>
-          </PressableScale>
-          <PressableScale
-            haptic="selection"
-            onPress={() => setDisplayMode('trend')}
-            style={[styles.chartModeBtn, displayMode === 'trend' && styles.chartModeBtnActive]}
-            accessibilityLabel="Show smoothed trendline only"
-          >
-            <Text style={[styles.chartModeBtnText, displayMode === 'trend' && styles.chartModeBtnTextActive]}>Trend</Text>
-          </PressableScale>
-          <PressableScale
-            haptic="selection"
-            onPress={() => setDisplayMode('raw')}
-            style={[styles.chartModeBtn, displayMode === 'raw' && styles.chartModeBtnActive]}
-            accessibilityLabel="Show raw weigh-ins only"
-          >
-            <Text style={[styles.chartModeBtnText, displayMode === 'raw' && styles.chartModeBtnTextActive]}>Raw</Text>
-          </PressableScale>
-        </View>
-      </View>
-
-      {/* Metrics Bar */}
-      <View style={styles.chartControlBar}>
-        <View style={styles.chartMetricRow}>
-          {trendPoints.length > 0 && (
-            <View style={styles.chartTrendPill}>
-              <Text style={styles.chartTrendPillLabel}>
-                {trendPoints.length === 1 ? 'Current' : '7d Trend'}
-              </Text>
-              <Text style={styles.chartTrendPillValue}>
-                {(Math.round(trendPoints[trendPoints.length - 1].trendWeight * 10) / 10)} kg
-              </Text>
-            </View>
-          )}
-          {weeklyRate != null ? (
-            <View
-              style={[
-                styles.chartRatePill,
-                weeklyRate < 0
-                  ? styles.pillSuccess
-                  : weeklyRate > 0
-                    ? styles.pillWarning
-                    : styles.pillNeutral,
-              ]}
-            >
-              {weeklyRate < 0 ? (
-                <TrendingDown size={11} color={colors.primaryLight} strokeWidth={2.5} />
-              ) : weeklyRate > 0 ? (
-                <TrendingUp size={11} color={colors.amber} strokeWidth={2.5} />
-              ) : (
-                <Minus size={11} color={colors.textMuted} strokeWidth={2.5} />
-              )}
-              <Text
-                style={[
-                  styles.chartRatePillText,
-                  weeklyRate < 0
-                    ? styles.textSuccess
-                    : weeklyRate > 0
-                      ? styles.textWarning
-                      : { color: colors.textMuted },
-                ]}
-              >
-                {weeklyRate > 0 ? `+${weeklyRate}` : `${weeklyRate}`} kg/wk
-              </Text>
-            </View>
-          ) : trendPoints.length === 1 ? (
-            <View style={[styles.chartRatePill, styles.pillNeutral]}>
-              <Text style={[styles.chartRatePillText, { color: colors.textMuted }]}>
-                Baseline
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        {points.length > 0 && (
-          <Text style={styles.scrubHintText} numberOfLines={1}>
-            {points.length === 1 ? 'Tap the point to inspect details' : 'Tap & drag to inspect a point'}
-          </Text>
-        )}
-
-        {points.length > 0 && (
-          <View style={styles.chartLegendRow}>
-            {(displayMode === 'raw' || displayMode === 'both') && (
-              <View style={styles.chartLegendItem}>
-                <View style={[styles.chartLegendDot, { backgroundColor: colors.primaryLight }]} />
-                <Text style={styles.chartLegendText}>Weigh-in</Text>
-              </View>
-            )}
-            {(displayMode === 'trend' || displayMode === 'both') && (
-              <View style={styles.chartLegendItem}>
-                <View style={[styles.chartLegendSwatch, { backgroundColor: colors.primaryLight }]} />
-                <Text style={styles.chartLegendText}>7d trend</Text>
-              </View>
-            )}
-            {targetWeight != null && (
-              <View style={styles.chartLegendItem}>
-                <View style={[styles.chartLegendSwatch, styles.chartLegendDashed, { borderColor: colors.cyan }]} />
-                <Text style={styles.chartLegendText}>Target</Text>
-              </View>
-            )}
-          </View>
-        )}
-      </View>
-
-      <GestureDetector gesture={composedGesture}>
-        <View style={{ width: layoutWidth, height: chartHeight }}>
-          <Svg width={layoutWidth} height={chartHeight}>
-            <Defs>
-              <LinearGradient id="chartGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                <Stop offset="0%" stopColor={colors.primaryLight} stopOpacity="0.38" />
-                <Stop offset="100%" stopColor={colors.primaryLight} stopOpacity="0.0" />
-              </LinearGradient>
-            </Defs>
-
-            {/* Baseline grid lines */}
-            <Line
-              x1={paddingLeft}
-              y1={paddingTop}
-              x2={layoutWidth - paddingRight}
-              y2={paddingTop}
-              stroke={colors.borderSubtle}
-              strokeDasharray="4 4"
-            />
-            <Line
-              x1={paddingLeft}
-              y1={paddingTop + innerH / 2}
-              x2={layoutWidth - paddingRight}
-              y2={paddingTop + innerH / 2}
-              stroke={colors.borderSubtle}
-              strokeDasharray="4 4"
-            />
-            <Line
-              x1={paddingLeft}
-              y1={chartHeight - paddingBottom}
-              x2={layoutWidth - paddingRight}
-              y2={chartHeight - paddingBottom}
-              stroke={colors.borderSubtle}
-            />
-
-            {/* Target line, always labeled with its value so it reads correctly without scrubbing */}
-            {targetY != null && (
-              <>
-                <Line
-                  x1={paddingLeft}
-                  y1={targetY}
-                  x2={layoutWidth - paddingRight}
-                  y2={targetY}
-                  stroke={colors.cyan}
-                  strokeDasharray="6 3"
-                  strokeWidth={1.5}
-                />
-                <SvgText
-                  x={paddingLeft + 2}
-                  y={targetY - 5}
-                  fill={colors.cyan}
-                  fontSize="9"
-                  fontWeight="700"
-                >
-                  {`Target ${targetWeight}kg`}
-                </SvgText>
-              </>
-            )}
-
-            {/* Single point horizontal reference line */}
-            {points.length === 1 && (
-              <Line
-                x1={paddingLeft}
-                y1={points[0].rawY}
-                x2={layoutWidth - paddingRight}
-                y2={points[0].rawY}
-                stroke={colors.primaryLight}
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                opacity={0.35}
-              />
-            )}
-
-            {/* Shaded Area under Trendline */}
-            {trendAreaPath !== '' && (displayMode === 'trend' || displayMode === 'both') && (
-              <Path d={trendAreaPath} fill="url(#chartGradient)" />
-            )}
-
-            {/* Raw Weigh-in Line */}
-            {rawLinePath !== '' && (displayMode === 'raw' || displayMode === 'both') && (
-              <Path
-                d={rawLinePath}
-                fill="none"
-                stroke={displayMode === 'both' ? colors.borderGlow : colors.primaryLight}
-                strokeWidth={displayMode === 'both' ? 1.5 : 2.5}
-                strokeDasharray={displayMode === 'both' ? '4 3' : undefined}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={displayMode === 'both' ? 0.6 : 1}
-              />
-            )}
-
-            {/* Smoothed Trend Line */}
-            {trendLinePath !== '' && (displayMode === 'trend' || displayMode === 'both') && (
-              <Path
-                d={trendLinePath}
-                fill="none"
-                stroke={colors.primaryLight}
-                strokeWidth={3.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            )}
-
-            {/* Single Point Presentation */}
-            {points.length === 1 && (
-              <>
-                <Circle
-                  cx={points[0].x}
-                  cy={points[0].rawY}
-                  r={12}
-                  fill={colors.primaryLight}
-                  fillOpacity={0.2}
-                />
-                <Circle
-                  cx={points[0].x}
-                  cy={points[0].rawY}
-                  r={scrubIndex === 0 ? 6.5 : 5}
-                  fill={scrubIndex === 0 ? colors.amber : colors.primaryLight}
-                  stroke="#FFFFFF"
-                  strokeWidth={2}
-                />
-                <SvgText
-                  x={points[0].x}
-                  y={points[0].rawY - 14}
-                  textAnchor="middle"
-                  fill={colors.primaryLight}
-                  fontSize="12"
-                  fontWeight="800"
-                >
-                  {points[0].weight} kg
-                </SvgText>
-              </>
-            )}
-
-            {/* Raw Weigh-in Data Points (when multiple points) */}
-            {points.length > 1 && (displayMode === 'raw' || displayMode === 'both') &&
-              points.map((pt, i) => (
-                <Circle
-                  key={`raw-pt-${i}`}
-                  cx={pt.x}
-                  cy={pt.rawY}
-                  r={scrubIndex === i ? 5.5 : 3.5}
-                  fill={scrubIndex === i ? colors.amber : colors.surface}
-                  stroke={scrubIndex === i ? '#FFFFFF' : displayMode === 'both' ? colors.textMuted : colors.primaryLight}
-                  strokeWidth={1.5}
-                />
-              ))}
-
-            {/* Trend Data Points in Trend-only Mode (when multiple points) */}
-            {points.length > 1 && displayMode === 'trend' &&
-              points.map((pt, i) => (
-                <Circle
-                  key={`trend-pt-${i}`}
-                  cx={pt.x}
-                  cy={pt.trendY}
-                  r={scrubIndex === i ? 6 : 4}
-                  fill={scrubIndex === i ? colors.primaryLight : colors.surface}
-                  stroke={colors.primaryLight}
-                  strokeWidth={2}
-                />
-              ))}
-
-            {/* Active Vertical Cursor Scrub Line & Concentric Node Markers */}
-            {activePoint && points.length > 1 && (
-              <>
-                {/* Glowing vertical cursor line spanning the chart height */}
-                <Line
-                  x1={activePoint.x}
-                  y1={paddingTop - 6}
-                  x2={activePoint.x}
-                  y2={chartHeight - paddingBottom}
-                  stroke={colors.primaryLight}
-                  strokeWidth={2}
-                  strokeDasharray="4 2"
-                />
-
-                {/* Trend marker halo */}
-                <Circle
-                  cx={activePoint.x}
-                  cy={activePoint.trendY}
-                  r={12}
-                  fill={colors.primaryLight}
-                  fillOpacity={0.22}
-                />
-                <Circle
-                  cx={activePoint.x}
-                  cy={activePoint.trendY}
-                  r={5.5}
-                  fill={colors.primaryLight}
-                  stroke="#FFFFFF"
-                  strokeWidth={2}
-                />
-
-                {/* Raw weigh-in marker halo */}
-                {displayMode === 'both' && (
-                  <>
-                    <Circle
-                      cx={activePoint.x}
-                      cy={activePoint.rawY}
-                      r={9}
-                      fill={colors.amber}
-                      fillOpacity={0.25}
-                    />
-                    <Circle
-                      cx={activePoint.x}
-                      cy={activePoint.rawY}
-                      r={4.5}
-                      fill={colors.amber}
-                      stroke="#FFFFFF"
-                      strokeWidth={1.8}
-                    />
-                  </>
-                )}
-              </>
-            )}
-
-            {/* Axis Date Labels */}
-            {scopedWeights.length === 1 && (
-              <SvgText
-                x={layoutWidth / 2}
-                y={chartHeight - 10}
-                fill={colors.textMuted}
-                fontSize="10"
-                fontWeight="600"
-                textAnchor="middle"
-              >
-                {scopedWeights[0].date.slice(5)}
-              </SvgText>
-            )}
-            {scopedWeights.length > 1 && (
-              <>
-                <SvgText
-                  x={paddingLeft}
-                  y={chartHeight - 10}
-                  fill={colors.textMuted}
-                  fontSize="10"
-                  fontWeight="600"
-                >
-                  {scopedWeights[0].date.slice(5)}
-                </SvgText>
-                <SvgText
-                  x={layoutWidth - paddingRight}
-                  y={chartHeight - 10}
-                  fill={colors.textMuted}
-                  fontSize="10"
-                  fontWeight="600"
-                  textAnchor="end"
-                >
-                  {scopedWeights[scopedWeights.length - 1].date.slice(5)}
-                </SvgText>
-              </>
-            )}
-
-            {/* Y-axis Min/Max Labels */}
-            {hasValues && (
-              <>
-                <SvgText
-                  x={layoutWidth - 6}
-                  y={paddingTop + 4}
-                  fill={colors.textMuted}
-                  fontSize="9"
-                  textAnchor="end"
-                >
-                  {Math.round(chartMax)}kg
-                </SvgText>
-                <SvgText
-                  x={layoutWidth - 6}
-                  y={chartHeight - paddingBottom - 2}
-                  fill={colors.textMuted}
-                  fontSize="9"
-                  textAnchor="end"
-                >
-                  {Math.round(chartMin)}kg
-                </SvgText>
-              </>
-            )}
-          </Svg>
-
-          {/* Empty Overlay when zero weights logged */}
-          {points.length === 0 && (
-            <View style={styles.chartEmptyOverlay} pointerEvents="none">
-              <Scale size={24} color={colors.textMuted} />
-              <Text style={styles.chartEmptyTitle}>No weigh-ins logged yet</Text>
-              <Text style={styles.chartEmptySubtitle}>
-                Tap &ldquo;Record Weigh-in&rdquo; to start your trend trajectory
-              </Text>
-            </View>
-          )}
-
-          {/* Interactive Tooltip Card Floating Above / Clamped */}
-          {activePoint && (
-            <Animated.View
-              entering={FadeIn.duration(150)}
-              exiting={FadeOut.duration(150)}
-              style={[
-                styles.chartTooltip,
-                {
-                  left: Math.max(12, Math.min(layoutWidth - 175, activePoint.x - 85)),
-                },
-              ]}
-              pointerEvents="none"
-            >
-              <View style={styles.chartTooltipHeader}>
-                <Calendar size={11} color={colors.primaryLight} />
-                <Text style={styles.chartTooltipDate}>{activePoint.date}</Text>
-              </View>
-
-              <View style={styles.chartTooltipRow}>
-                <Text style={styles.chartTooltipLabel}>Scale Weigh-in:</Text>
-                <Text style={styles.chartTooltipRaw}>{activePoint.weight} kg</Text>
-              </View>
-
-              <View style={styles.chartTooltipRow}>
-                <Text style={styles.chartTooltipLabel}>7d Moving Avg:</Text>
-                <Text style={styles.chartTooltipTrend}>
-                  {Math.round(activePoint.trend * 10) / 10} kg
-                </Text>
-                <Text
-                  style={[
-                    styles.chartTooltipVariance,
-                    {
-                      color:
-                        activePoint.variance > 0
-                          ? colors.amber
-                          : activePoint.variance < 0
-                            ? colors.cyan
-                            : colors.textMuted,
-                    },
-                  ]}
-                >
-                  ({activePoint.variance > 0 ? `+${activePoint.variance}` : activePoint.variance})
-                </Text>
-              </View>
-
-              {activeDeltaTarget != null && (
-                <View style={styles.chartTooltipRow}>
-                  <Text style={styles.chartTooltipLabel}>To Target ({targetWeight}kg):</Text>
-                  <Text
-                    style={[
-                      styles.chartTooltipTargetDelta,
-                      activeDeltaTarget <= 0 ? styles.textSuccess : styles.textWarning,
-                    ]}
-                  >
-                    {activeDeltaTarget > 0 ? `+${activeDeltaTarget}` : activeDeltaTarget} kg
-                  </Text>
-                </View>
-              )}
-
-              {activeDeltaBaseline != null && activeDeltaBaseline !== 0 && (
-                <View style={styles.chartTooltipRow}>
-                  <Text style={styles.chartTooltipLabel}>Since start:</Text>
-                  <Text
-                    style={[
-                      styles.chartTooltipTargetDelta,
-                      activeDeltaBaseline < 0 ? styles.textSuccess : styles.textWarning,
-                    ]}
-                  >
-                    {activeDeltaBaseline > 0 ? `+${activeDeltaBaseline}` : activeDeltaBaseline} kg
-                  </Text>
-                </View>
-              )}
-            </Animated.View>
-          )}
-        </View>
-      </GestureDetector>
-    </Animated.View>
-  );
-}
 
 // ==========================================
 // 2. PR RECORDS SECTION (WITH CELEBRATION & LOGGING)
@@ -2065,6 +1496,24 @@ function PrsSection({
 // 3. BODY MEASUREMENTS SECTION
 // ==========================================
 
+type MeasurementSite = 'waist' | 'chest' | 'arms' | 'hips' | 'thighs';
+const MEASUREMENT_SITES: { key: MeasurementSite; label: string; field: keyof BodyMeasurement }[] = [
+  { key: 'waist', label: 'Waist', field: 'waist_cm' },
+  { key: 'chest', label: 'Chest', field: 'chest_cm' },
+  { key: 'arms', label: 'Arms', field: 'arms_cm' },
+  { key: 'hips', label: 'Hips', field: 'hips_cm' },
+  { key: 'thighs', label: 'Thighs', field: 'thighs_cm' },
+];
+const MEASUREMENT_SITE_OPTIONS = MEASUREMENT_SITES.map((s) => ({ value: s.key, label: s.label }));
+
+type MeasurementPeriod = '3M' | '6M' | '1Y' | 'ALL';
+const MEASUREMENT_PERIOD_OPTIONS: { value: MeasurementPeriod; label: string }[] = [
+  { value: '3M', label: '3M' },
+  { value: '6M', label: '6M' },
+  { value: '1Y', label: '1Y' },
+  { value: 'ALL', label: 'ALL' },
+];
+
 function MeasurementsSection({
   measurements,
   isLogging,
@@ -2139,6 +1588,28 @@ function MeasurementsSection({
   const hipsDelta = calculateDelta('hips_cm');
   const thighsDelta = calculateDelta('thighs_cm');
 
+  const [measurementSite, setMeasurementSite] = useState<MeasurementSite>('waist');
+  const [measurementPeriod, setMeasurementPeriod] = useState<MeasurementPeriod>('ALL');
+  const siteConfig = MEASUREMENT_SITES.find((s) => s.key === measurementSite)!;
+
+  const scopedMeasurements = useMemo(() => {
+    if (chrono.length === 0) return [];
+    if (measurementPeriod === 'ALL' || chrono.length <= 1) return chrono;
+    const now = new Date();
+    const daysMap: Record<MeasurementPeriod, number> = { '3M': 90, '6M': 180, '1Y': 365, ALL: 99999 };
+    const cutoffTime = now.getTime() - daysMap[measurementPeriod] * 24 * 60 * 60 * 1000;
+    const filtered = chrono.filter((m) => new Date(m.date).getTime() >= cutoffTime);
+    return filtered.length > 0 ? filtered : chrono;
+  }, [chrono, measurementPeriod]);
+
+  const siteChartData = useMemo(
+    () =>
+      scopedMeasurements
+        .filter((m) => m[siteConfig.field] != null)
+        .map((m) => ({ value: m[siteConfig.field] as number, date: m.date })),
+    [scopedMeasurements, siteConfig]
+  );
+
   return (
     <View style={styles.sectionWrap}>
       {/* Deltas Grid */}
@@ -2151,6 +1622,53 @@ function MeasurementsSection({
           <MeasurementSummaryCard label="Thighs" delta={thighsDelta} />
           <MeasurementSummaryCard label="Hips" delta={hipsDelta} />
         </View>
+      </Animated.View>
+
+      {/* Trend Chart */}
+      <Animated.View entering={enter(1)}>
+        <Card elevated style={styles.chartCard}>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardEyebrow}>Body Composition</Text>
+              <Text style={styles.cardTitle}>{siteConfig.label} Over Time</Text>
+            </View>
+            <Badge
+              label={`${siteChartData.length} log${siteChartData.length === 1 ? '' : 's'}`}
+              tone="cyan"
+            />
+          </View>
+
+          <View style={styles.periodFilterWrap}>
+            <PeriodFilter
+              options={MEASUREMENT_SITE_OPTIONS}
+              value={measurementSite}
+              onChange={setMeasurementSite}
+              accessibilityLabel="Measurement site"
+            />
+          </View>
+
+          <View style={styles.periodFilterWrap}>
+            <PeriodFilter
+              options={MEASUREMENT_PERIOD_OPTIONS}
+              value={measurementPeriod}
+              onChange={setMeasurementPeriod}
+              size="sm"
+              accessibilityLabel="Measurement chart period"
+            />
+          </View>
+
+          <LineChart
+            data={siteChartData}
+            color={colors.cyan}
+            unit="cm"
+            emptyState={{
+              icon: <Ruler size={24} color={colors.textMuted} />,
+              title: `No ${siteConfig.label.toLowerCase()} measurements yet`,
+              subtitle: 'Log tape measurements to see your trend here.',
+            }}
+            accessibilityLabel={`${siteConfig.label} measurement trend chart`}
+          />
+        </Card>
       </Animated.View>
 
       {/* Collapsible Measurement Logger */}

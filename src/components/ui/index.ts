@@ -9,6 +9,7 @@ export * from './ErrorState';
 export * from './Input';
 export * from './LoadingSpinner';
 export * from './MetricCard';
+export * from './PeriodFilter';
 export * from './PressableScale';
 export * from './ProgressBar';
 export * from './ProgressRing';

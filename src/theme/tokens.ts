@@ -23,6 +23,7 @@ export const lightColors = {
   primaryLight: '#059669', // slightly deeper emerald so it stays legible on white
   primaryGlow: 'rgba(16, 185, 129, 0.15)',
   primarySurface: 'rgba(15, 118, 110, 0.10)',
+  tealTint: '#DCEFEA',
 
   // Functional Accents
   cyan: '#0284C7',
@@ -69,6 +70,7 @@ export const darkColors: typeof lightColors = {
 
   primaryLight: '#10B981',
   primarySurface: 'rgba(15, 118, 110, 0.12)',
+  tealTint: 'rgba(15, 118, 110, 0.20)',
 
   track: 'rgba(148, 163, 184, 0.16)',
 

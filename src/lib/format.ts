@@ -19,6 +19,25 @@ export function dateKeyToLocalDate(key: string): Date {
   return parseDateKey(key);
 }
 
+/**
+ * Consecutive-day logging streak, counted backward from the most recent day
+ * the user had a chance to log (today, or yesterday if today isn't logged yet).
+ * `isLogged` reports whether a given date key counts as "logged" for the metric.
+ */
+export function computeLoggingStreak(isLogged: (dateKey: string) => boolean): number {
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  if (!isLogged(toDateKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let streak = 0;
+  while (isLogged(toDateKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
 export function formatDateKey(key: string, options: Intl.DateTimeFormatOptions): string {
   return parseDateKey(key).toLocaleDateString('en-US', options);
 }

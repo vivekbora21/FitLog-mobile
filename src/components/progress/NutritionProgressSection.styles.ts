@@ -44,6 +44,10 @@ export const useStyles = makeStyles(({ colors }) => ({
     borderColor: colors.border,
     gap: 2,
   },
+  // Additive: marks the single primary KPI card (This Week Avg) so it reads first.
+  metricCardPrimary: {
+    borderColor: colors.primaryLight,
+  },
   metricLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -143,32 +147,9 @@ export const useStyles = makeStyles(({ colors }) => ({
     fontWeight: '700',
     color: colors.textMuted,
   },
-  // Timeframe filter
-  timeframeRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: 3,
+  // Period filter wrapper (the filter itself is the shared PeriodFilter component)
+  periodFilterWrap: {
     marginBottom: spacing.sm,
-    gap: 2,
-  },
-  timeframeBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    alignItems: 'center',
-    borderRadius: radius.sm,
-  },
-  timeframeBtnActive: {
-    backgroundColor: colors.primaryLight,
-  },
-  timeframeBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-    letterSpacing: 0.4,
-  },
-  timeframeBtnTextActive: {
-    color: '#FFFFFF',
   },
   // Chart container
   chartContainer: {
