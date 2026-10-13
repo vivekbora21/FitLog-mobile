@@ -65,7 +65,16 @@ export interface WorkoutDraft {
   routineId: string | null;
   exercises: DraftExercise[];
   updatedAt: number;
+  /**
+   * Minted once when this draft is first created and resent unchanged on every
+   * "finish workout" attempt for it (including retries after a timeout or a
+   * double-tap), so the backend can recognize a retry and avoid creating a
+   * second session. A fresh draft gets a fresh key.
+   */
+  idempotencyKey: string;
 }
+
+export { createIdempotencyKey } from '../../lib/id';
 
 const DRAFT_KEY = 'fitlog_workout_draft_v1';
 // A draft older than this is almost certainly abandoned; don't nag about it.
@@ -349,6 +358,51 @@ export function dismissWorkoutDraftForSession(draft: Pick<WorkoutDraft, 'started
 
 export function isWorkoutDraftDismissedForSession(draft: Pick<WorkoutDraft, 'startedAt' | 'updatedAt'>): boolean {
   return !!dismissedDraft && dismissedDraft.startedAt === draft.startedAt && dismissedDraft.updatedAt >= draft.updatedAt;
+}
+
+/**
+ * A local backup of in-progress edits to an *already-saved* workout session — separate
+ * from WorkoutDraft (new/live workouts), since the two can legitimately coexist (e.g.
+ * editing yesterday's session while today's live workout is still in progress) and are
+ * never the same record. The original session on the server is left untouched until the
+ * edit is explicitly saved; this only protects the in-flight edit itself from an app kill
+ * or a failed save.
+ */
+export interface WorkoutEditDraft {
+  version: 1;
+  sessionId: string;
+  date: string;
+  title: string;
+  notes: string;
+  duration: string;
+  exercises: DraftExercise[];
+  updatedAt: number;
+}
+
+const EDIT_DRAFT_KEY = 'fitlog_workout_edit_draft_v1';
+
+export function loadWorkoutEditDraft(sessionId: string): WorkoutEditDraft | null {
+  const raw = kv.get(EDIT_DRAFT_KEY);
+  if (!raw) return null;
+  try {
+    const draft = JSON.parse(raw) as WorkoutEditDraft;
+    if (draft.version !== 1 || draft.sessionId !== sessionId || Date.now() - draft.updatedAt > DRAFT_MAX_AGE_MS) {
+      kv.remove(EDIT_DRAFT_KEY);
+      return null;
+    }
+    return draft;
+  } catch {
+    kv.remove(EDIT_DRAFT_KEY);
+    return null;
+  }
+}
+
+export function saveWorkoutEditDraft(draft: Omit<WorkoutEditDraft, 'version' | 'updatedAt'>): void {
+  kv.set(EDIT_DRAFT_KEY, JSON.stringify({ ...draft, version: 1, updatedAt: Date.now() }));
+}
+
+export function clearWorkoutEditDraft(): void {
+  kv.remove(EDIT_DRAFT_KEY);
 }
 
 /** "Started just now" / "Started 45m ago" / "Started 2h ago" — how long a draft has existed. */

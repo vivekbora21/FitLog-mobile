@@ -35,8 +35,9 @@ import type {
   CardioEntry,
   CardioEntryPayload,
   Blueprint,
+  TrainingSplit,
   PlanPreviewPayload,
-  PlanRoadmap,
+  PlanPreviewResult,
   CreatePlanPayload,
   CreatePlanResponse,
 } from '../types';
@@ -155,6 +156,7 @@ export type WorkoutSessionPayload = {
   started_at: string;
   duration_seconds: number;
   notes?: string;
+  idempotency_key?: string;
   exercises: {
     exercise: string;
     order: number;
@@ -456,6 +458,17 @@ class ApiClient {
   }
 
   async logout(): Promise<void> {
+    const refresh = await getRefreshToken();
+    if (refresh) {
+      // Best-effort: revoke the refresh token server-side so a leaked token or a
+      // stale device can't keep refreshing after the user signs out. Local tokens
+      // are cleared regardless, even if the request fails (offline logout must work).
+      try {
+        await this.post('/auth/logout/', { refresh });
+      } catch {
+        // Ignore — signing out locally must still succeed without connectivity.
+      }
+    }
     await clearTokens();
   }
 
@@ -549,6 +562,20 @@ class ApiClient {
     return this.get('/workouts/sessions/today/', { date: dateKey });
   }
 
+  // Whether the server already considers this date "done" (a real logged session, a
+  // self-reported Completed day, or a completed program day) — used to decide whether
+  // a local unfinished-workout draft is still safe to offer as "Resume".
+  async getWorkoutDayStatus(dateKey: string): Promise<{
+    date: string;
+    has_session: boolean;
+    session_id: string | null;
+    self_reported_completed: boolean;
+    program_day_completed: boolean;
+    is_already_done: boolean;
+  }> {
+    return this.get('/workouts/sessions/day-status/', { date: dateKey });
+  }
+
   // Archives the active journey (history is kept) and schedules a new one starting today.
   async startJourney(payload: {
     mode: JourneyMode;
@@ -566,8 +593,15 @@ class ApiClient {
     return this.get<{ blueprints: Blueprint[] }>('/plans/blueprints/');
   }
 
-  async previewPlan(payload: PlanPreviewPayload): Promise<PlanRoadmap> {
-    return this.post<PlanRoadmap>('/plans/preview/', payload);
+  async getTrainingSplits(): Promise<{ splits: TrainingSplit[] }> {
+    return this.get<{ splits: TrainingSplit[] }>('/plans/splits/');
+  }
+
+  // Spec v1.6 section 11.3 V-21: a 200 response here can be either a full
+  // PlanRoadmap or a NoSupportedSplitResult (`can_start: false`, HTTP 200 --
+  // not an error) -- use `isNoSupportedSplitResult()` to discriminate.
+  async previewPlan(payload: PlanPreviewPayload): Promise<PlanPreviewResult> {
+    return this.post<PlanPreviewResult>('/plans/preview/', payload);
   }
 
   async createPlan(payload: CreatePlanPayload): Promise<CreatePlanResponse> {
@@ -623,6 +657,7 @@ class ApiClient {
     protein_g?: number;
     carbs_g?: number;
     fat_g?: number;
+    idempotency_key?: string;
   }): Promise<MealEntry> {
     return this.post<MealEntry>('/nutrition/meals/', meal);
   }
@@ -745,7 +780,7 @@ class ApiClient {
     first_name?: string;
     last_name?: string;
     profile?: Partial<
-      Pick<UserProfile, 'height_cm' | 'weight_kg' | 'activity_level' | 'fitness_goal' | 'sex' | 'date_of_birth'>
+      Pick<UserProfile, 'height_cm' | 'weight_kg' | 'activity_level' | 'fitness_goal' | 'sex' | 'date_of_birth' | 'timezone'>
     >;
   }): Promise<User> {
     return this.patch<User>('/auth/me/', payload);

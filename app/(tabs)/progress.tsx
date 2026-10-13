@@ -51,7 +51,7 @@ import {
   PressableScale,
   ScreenHeader,
 } from '../../src/components/ui';
-import { LineChart, type LineChartMode } from '../../src/components/charts';
+import { LineChart, BarChart, type LineChartMode, type BarChartDatum } from '../../src/components/charts';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { useTheme } from '../../src/theme';
 import { useStyles } from '../../src/components/progress/progress.styles';
@@ -1218,8 +1218,44 @@ function PrsSection({
   const [showAllPrs, setShowAllPrs] = useState(false);
   const visiblePrs = showAllPrs ? prs : prs.slice(0, HISTORY_PAGE_SIZE);
 
+  const topLiftsChartData: BarChartDatum[] = useMemo(
+    () =>
+      [...prs]
+        .sort((a, b) => (b.estimated_one_rep_max || b.max_weight_kg) - (a.estimated_one_rep_max || a.max_weight_kg))
+        .slice(0, 8)
+        .map((pr) => ({
+          key: pr.id,
+          label: pr.exercise_name.length > 10 ? `${pr.exercise_name.slice(0, 9)}…` : pr.exercise_name,
+          value: Math.round(pr.estimated_one_rep_max || pr.max_weight_kg),
+          active: true,
+        })),
+    [prs]
+  );
+
   return (
     <View style={styles.sectionWrap}>
+      {/* Top Lifts Chart */}
+      {prs.length > 0 && (
+        <Animated.View entering={enter(0)}>
+          <Card elevated style={styles.chartCard}>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.cardEyebrow}>Strength Ranking</Text>
+                <Text style={styles.cardTitle}>Top Lifts by Est. 1RM</Text>
+              </View>
+              <Badge label={`${topLiftsChartData.length} lifts`} tone="amber" />
+            </View>
+            <BarChart
+              data={topLiftsChartData}
+              color={colors.warning}
+              unit=" kg"
+              formatValue={(v) => `${Math.round(v)}`}
+              accessibilityLabel="Top lifts by estimated one-rep max"
+            />
+          </Card>
+        </Animated.View>
+      )}
+
       {/* Search and Filters */}
       <Animated.View entering={enter(0)}>
         <View style={styles.searchBar}>

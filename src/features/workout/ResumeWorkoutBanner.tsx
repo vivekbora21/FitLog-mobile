@@ -1,10 +1,12 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight, Dumbbell, X } from 'lucide-react-native';
+import { ChevronRight, Dumbbell, TriangleAlert, X } from 'lucide-react-native';
+import { api } from '../../api/client';
 import { PressableScale } from '../../components/ui';
 import { makeStyles, radius, spacing, useTheme } from '../../theme';
 import {
+  clearWorkoutDraft,
   dismissWorkoutDraftForSession,
   draftHasContent,
   formatDraftAge,
@@ -19,17 +21,70 @@ export function ResumeWorkoutBanner({ featured = false }: { featured?: boolean }
   const styles = useStyles();
   const router = useRouter();
   const [draft, setDraft] = useState<WorkoutDraft | null>(null);
+  // undefined = still checking (or check failed/offline — assume resumable, since a
+  // false alarm costs a tap while wrongly blocking "Resume" could look like data loss).
+  const [alreadyDone, setAlreadyDone] = useState<boolean | undefined>(undefined);
 
   useFocusEffect(
     useCallback(() => {
       const d = loadWorkoutDraft();
       const hasUndismissedContent = !!d && draftHasContent(d) && !isWorkoutDraftDismissedForSession(d);
       setDraft(hasUndismissedContent ? d : null);
+      setAlreadyDone(undefined);
     }, [])
   );
 
+  // BUG-09: a local draft has no idea whether the server already has this date marked
+  // done (e.g. the day was completed from another device, or via the calendar). Check
+  // before offering "Resume" so tapping it can't create a confusing duplicate session.
+  useEffect(() => {
+    if (!draft) return;
+    let cancelled = false;
+    api
+      .getWorkoutDayStatus(draft.date)
+      .then((status) => {
+        if (!cancelled) setAlreadyDone(status.is_already_done);
+      })
+      .catch(() => {
+        if (!cancelled) setAlreadyDone(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [draft]);
+
   if (!draft) return null;
   const sets = draft.exercises.reduce((n, ex) => n + ex.sets.filter((s) => s.done).length, 0);
+
+  if (alreadyDone) {
+    return (
+      <View style={[styles.banner, styles.staleBanner, featured && styles.featuredBanner]}>
+        <PressableScale
+          haptic="light"
+          onPress={() => {
+            clearWorkoutDraft();
+            setDraft(null);
+          }}
+          style={[styles.pressable, featured && styles.featuredPressable]}
+          accessibilityRole="button"
+          accessibilityLabel={`${draft.title || 'Workout'} draft is for a day already marked done — tap to discard it`}
+        >
+          <View style={[styles.icon, styles.staleIcon, featured && styles.featuredIcon]}>
+            <TriangleAlert size={featured ? 21 : 18} color={colors.textInverse} />
+          </View>
+          <View style={styles.flex}>
+            <Text style={[styles.eyebrow, styles.staleEyebrow, featured && styles.featuredEyebrow]}>Already recorded</Text>
+            <Text style={styles.title} numberOfLines={featured ? 2 : 1}>
+              {draft.title || 'Workout'} for {formatDraftAge(draft.startedAt)}
+            </Text>
+            <Text style={styles.meta}>This day is already marked done elsewhere</Text>
+          </View>
+          <Text style={styles.cta}>Discard</Text>
+          <ChevronRight size={18} color={colors.primaryLight} />
+        </PressableScale>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.banner, featured && styles.featuredBanner]}>
@@ -85,6 +140,16 @@ const useStyles = makeStyles(({ colors }) => ({
     marginBottom: spacing.xl,
     borderRadius: radius.xl,
     borderColor: colors.primaryLight,
+  },
+  staleBanner: {
+    backgroundColor: colors.amberGlow,
+    borderColor: colors.amber,
+  },
+  staleIcon: {
+    backgroundColor: colors.amber,
+  },
+  staleEyebrow: {
+    color: colors.amber,
   },
   pressable: {
     flex: 1,

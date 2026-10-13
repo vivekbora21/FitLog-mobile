@@ -172,14 +172,13 @@ export function WeekCalendar({
           if (status === 'UPCOMING' && (heatmap[key] || 0) > 0) {
             status = 'COMPLETED';
           }
-          // Default Sunday to a rest day when it has no completed/skipped/rest status yet
-          if (status === 'UPCOMING' && d.getDay() === 0) {
-            status = 'REST';
-          }
-
           const isCompleted = status === 'COMPLETED';
           const isRest = status === 'REST';
           const isSkipped = status === 'SKIPPED';
+          // BUG-12: a day can be marked "Completed" with no logged workout at all (the
+          // calendar's own "Mark as Completed" button) — don't let that look identical to
+          // a day with a real, verified session.
+          const isSelfReportedCompleted = isCompleted && info?.has_workout === false;
 
           const dayLetter = d.toLocaleDateString('en-US', { weekday: 'narrow' });
           const dayNumber = d.getDate();
@@ -194,7 +193,9 @@ export function WeekCalendar({
                 isSelected && styles.dayColSelected,
                 isToday && !isSelected && styles.dayColToday,
               ]}
-              accessibilityLabel={`${d.toLocaleDateString('en-US', { weekday: 'long' })}, ${dayNumber}: ${status.toLowerCase()}`}
+              accessibilityLabel={`${d.toLocaleDateString('en-US', { weekday: 'long' })}, ${dayNumber}: ${
+                isSelfReportedCompleted ? 'marked completed, no workout logged' : status.toLowerCase()
+              }`}
               accessibilityHint="Tap to view or change day status"
             >
               <Text style={[styles.dayLabel, (isToday || isSelected) && styles.dayLabelStrong]}>
@@ -204,7 +205,7 @@ export function WeekCalendar({
               <View
                 style={[
                   styles.dayDot,
-                  isCompleted && styles.dayDotCompleted,
+                  isCompleted && (isSelfReportedCompleted ? styles.dayDotCompletedSelfReported : styles.dayDotCompleted),
                   isRest && styles.dayDotRest,
                   isSkipped && styles.dayDotSkipped,
                   isToday && !isCompleted && !isRest && !isSkipped && styles.dayDotTodayEmpty,
@@ -212,7 +213,7 @@ export function WeekCalendar({
                 ]}
               >
                 {isCompleted ? (
-                  <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                  <Check size={14} color={isSelfReportedCompleted ? '#10B981' : '#FFFFFF'} strokeWidth={3} />
                 ) : isRest ? (
                   <Moon size={14} color={colors.cyan} strokeWidth={2.6} />
                 ) : isSkipped ? (
@@ -372,6 +373,13 @@ const useStyles = makeStyles(({ colors }) => ({
   dayDotCompleted: {
     backgroundColor: '#10B981',
     borderColor: '#059669',
+  },
+  // A day marked Completed with no logged workout — same hue, but hollow rather than
+  // filled, so it reads as "self-reported" without needing a legend entry of its own.
+  dayDotCompletedSelfReported: {
+    backgroundColor: 'rgba(16, 185, 129, 0.16)',
+    borderColor: '#10B981',
+    borderStyle: 'dashed',
   },
   dayDotRest: {
     backgroundColor: 'rgba(2, 132, 199, 0.16)',

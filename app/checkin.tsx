@@ -4,14 +4,19 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { FadeInDown, FadeIn, FadeOut } from 'react-native-reanimated';
 import { Footprints, Moon, Scale, Zap } from 'lucide-react-native';
-import { api, extractErrorMessage } from '../src/api/client';
-import { Badge, Button, DateNavigator, Input, PressableScale, SheetScreen, Skeleton } from '../src/components/ui';
+import { api, ApiError, extractErrorMessage } from '../src/api/client';
+import { Badge, Button, DateNavigator, Input, PressableScale, SheetScreen, Skeleton, useToast } from '../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../src/theme';
 import { isValidDateKey, parseNumberInput, toDateKey } from '../src/lib/format';
 import { invalidateTrackingData } from '../src/lib/queries';
 import { useAuth } from '../src/providers/auth';
 import type { DailyLog, WeightEntry } from '../src/types';
 import { haptics } from '../src/lib/haptics';
+import { enqueueOperation } from '../src/lib/offlineQueue';
+
+function isTransientApiError(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 0 || err.status === 408 || err.status >= 500);
+}
 
 const RATING_VALUES = [1, 2, 3, 4, 5];
 
@@ -153,6 +158,7 @@ function CheckInForm({
   const router = useRouter();
   const queryClient = useQueryClient();
   const { refreshUser } = useAuth();
+  const toast = useToast();
 
   const [steps, setSteps] = useState(numText(log?.steps));
   const [sleepHours, setSleepHours] = useState(numText(log?.sleep_hours));
@@ -173,23 +179,45 @@ function CheckInForm({
         recovery_notes: notes.trim(),
       });
       const weightVal = parseNumberInput(weight);
+      let weightQueued = false;
       if (weightVal != null && weightVal > 0 && weightVal !== existingWeight?.weight_kg) {
-        // One weigh-in per day: correct the existing entry rather than adding a second.
-        if (existingWeight) await api.updateWeight(existingWeight.id, weightVal);
-        else await api.logWeight(date, weightVal);
-        // Keep the profile's current weight in sync when logging today's weigh-in.
+        if (existingWeight) {
+          // Editing an existing day's entry — not one of the offline-queued paths
+          // (BUG-11 prioritizes new weigh-ins; a correction can surface its error as before).
+          await api.updateWeight(existingWeight.id, weightVal);
+        } else {
+          try {
+            await api.logWeight(date, weightVal);
+          } catch (err) {
+            if (!isTransientApiError(err)) throw err;
+            // BUG-11: bad gym wifi must not lose a weigh-in. Persisted locally before we
+            // report success; retried automatically once back online (see offlineQueue.ts).
+            enqueueOperation('weight', { date, weight_kg: weightVal }, `Weigh-in · ${date}`);
+            weightQueued = true;
+          }
+        }
+        // Keep the profile's current weight in sync when logging today's weigh-in —
+        // best-effort only; not worth queuing on its own if this fails.
         if (date === toDateKey(new Date())) {
-          await api.updateMe({ profile: { weight_kg: weightVal } });
-          await refreshUser();
+          try {
+            await api.updateMe({ profile: { weight_kg: weightVal } });
+            await refreshUser();
+          } catch {
+            // Ignore — the weigh-in itself (saved or queued above) is the record that matters.
+          }
         }
       }
+      return { weightQueued };
     },
-    onSuccess: async () => {
+    onSuccess: async ({ weightQueued }) => {
       haptics.success();
       await Promise.all([
         invalidateTrackingData(queryClient),
         queryClient.invalidateQueries({ queryKey: ['weights'] }),
       ]);
+      if (weightQueued) {
+        toast({ message: "Saved on this device — your weigh-in will sync once you're back online." });
+      }
       router.back();
     },
     onError: (err) => {

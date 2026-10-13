@@ -11,6 +11,7 @@ import { AuthProvider } from '../src/providers/auth';
 import { ToastProvider } from '../src/components/ui';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { ThemeProvider, useTheme } from '../src/theme';
+import { wireOfflineQueueTriggers } from '../src/lib/offlineQueue';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,6 +34,8 @@ if (Platform.OS !== 'web') {
     focusManager.setFocused(state === 'active');
   });
 }
+
+wireOfflineQueueTriggers();
 
 const modal = { presentation: 'modal', animation: 'slide_from_bottom' } as const;
 
@@ -61,6 +64,7 @@ function RootNavigator() {
         <Stack.Screen name="profile-edit" options={modal} />
         <Stack.Screen name="account/password" options={modal} />
         <Stack.Screen name="account/delete" options={modal} />
+        <Stack.Screen name="account/sync-status" options={modal} />
         <Stack.Screen name="plan" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="onboarding" options={{ ...modal, gestureEnabled: false }} />
         <Stack.Screen name="plan-select" options={modal} />

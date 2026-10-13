@@ -12,14 +12,20 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Search, Check, Minus, Plus, PencilLine, History, Zap, RotateCcw, BookMarked } from 'lucide-react-native';
-import { api, extractErrorMessage, type MealType } from '../../src/api/client';
-import { Button, ChipGroup, Input, PressableScale, SheetScreen } from '../../src/components/ui';
+import { api, ApiError, extractErrorMessage, type MealType } from '../../src/api/client';
+import { Button, ChipGroup, Input, PressableScale, SheetScreen, useToast } from '../../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
 import { formatNumber } from '../../src/types';
 import { formatDayLabel, isValidDateKey, parseNumberInput, toDateKey } from '../../src/lib/format';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
+import { createIdempotencyKey } from '../../src/lib/id';
+import { enqueueOperation } from '../../src/lib/offlineQueue';
 import { MealTemplateSheet } from '../../src/components/nutrition/MealTemplateSheet';
+
+function isTransientApiError(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 0 || err.status === 408 || err.status >= 500);
+}
 
 const MEAL_TYPES: { value: MealType; label: string }[] = [
   { value: 'BREAKFAST', label: 'Breakfast' },
@@ -85,6 +91,7 @@ export default function AddMealScreen() {
   const styles = useStyles();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const params = useLocalSearchParams<{ date?: string; type?: string; mode?: string }>();
   const date = isValidDateKey(params.date) ? params.date : toDateKey(new Date());
   const initialType = MEAL_TYPES.some((m) => m.value === params.type) ? (params.type as MealType) : defaultMealType();
@@ -156,56 +163,76 @@ export default function AddMealScreen() {
     return Math.round(p * 4 + c * 4 + f * 9);
   }, [quickProtein, quickCarbs, quickFat]);
 
-  const addMutation = useMutation({
-    mutationFn: () => {
-      if (mode === 'search' && picked) {
-        return picked.foodId
-          ? api.addMeal({ date, meal_type: mealType, food: picked.foodId, servings })
-          : api.addMeal({
-              date,
-              meal_type: mealType,
-              name: picked.name,
-              servings,
-              calories: Math.round(picked.calories * servings),
-              protein_g: +(picked.protein_g * servings).toFixed(1),
-              carbs_g: +(picked.carbs_g * servings).toFixed(1),
-              fat_g: +(picked.fat_g * servings).toFixed(1),
-            });
-      }
+  const buildMealPayload = (idempotencyKey: string) => {
+    if (mode === 'search' && picked) {
+      return picked.foodId
+        ? { date, meal_type: mealType, food: picked.foodId, servings, idempotency_key: idempotencyKey }
+        : {
+            date,
+            meal_type: mealType,
+            name: picked.name,
+            servings,
+            calories: Math.round(picked.calories * servings),
+            protein_g: +(picked.protein_g * servings).toFixed(1),
+            carbs_g: +(picked.carbs_g * servings).toFixed(1),
+            fat_g: +(picked.fat_g * servings).toFixed(1),
+            idempotency_key: idempotencyKey,
+          };
+    }
 
-      if (mode === 'quick') {
-        const cal = Math.round(parseNumberInput(quickCalories) ?? 0);
-        const p = parseNumberInput(quickProtein) ?? 0;
-        const c = parseNumberInput(quickCarbs) ?? 0;
-        const f = parseNumberInput(quickFat) ?? 0;
-        const slotLabel = MEAL_TYPES.find((m) => m.value === mealType)?.label ?? 'Meal';
-        const label = quickName.trim() || `Quick Add (${slotLabel})`;
-        return api.addMeal({
-          date,
-          meal_type: mealType,
-          name: label,
-          servings: 1,
-          calories: cal,
-          protein_g: p,
-          carbs_g: c,
-          fat_g: f,
-        });
-      }
-
-      return api.addMeal({
+    if (mode === 'quick') {
+      const cal = Math.round(parseNumberInput(quickCalories) ?? 0);
+      const p = parseNumberInput(quickProtein) ?? 0;
+      const c = parseNumberInput(quickCarbs) ?? 0;
+      const f = parseNumberInput(quickFat) ?? 0;
+      const slotLabel = MEAL_TYPES.find((m) => m.value === mealType)?.label ?? 'Meal';
+      const label = quickName.trim() || `Quick Add (${slotLabel})`;
+      return {
         date,
         meal_type: mealType,
-        name: custom.name.trim(),
+        name: label,
         servings: 1,
-        calories: Math.round(parseNumberInput(custom.calories) ?? 0),
-        protein_g: parseNumberInput(custom.protein) ?? 0,
-        carbs_g: parseNumberInput(custom.carbs) ?? 0,
-        fat_g: parseNumberInput(custom.fat) ?? 0,
-      });
+        calories: cal,
+        protein_g: p,
+        carbs_g: c,
+        fat_g: f,
+        idempotency_key: idempotencyKey,
+      };
+    }
+
+    return {
+      date,
+      meal_type: mealType,
+      name: custom.name.trim(),
+      servings: 1,
+      calories: Math.round(parseNumberInput(custom.calories) ?? 0),
+      protein_g: parseNumberInput(custom.protein) ?? 0,
+      carbs_g: parseNumberInput(custom.carbs) ?? 0,
+      fat_g: parseNumberInput(custom.fat) ?? 0,
+      idempotency_key: idempotencyKey,
+    };
+  };
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const payload = buildMealPayload(createIdempotencyKey());
+      try {
+        await api.addMeal(payload);
+        return { queued: false };
+      } catch (err) {
+        if (!isTransientApiError(err)) throw err;
+        // BUG-11: bad gym wifi must not lose a logged meal. Persisted locally before we
+        // report success; retried automatically once back online (see offlineQueue.ts).
+        enqueueOperation('meal', { meal: payload }, payload.name || 'Meal');
+        return { queued: true };
+      }
     },
-    onSuccess: async () => {
+    onSuccess: async ({ queued }) => {
       haptics.success();
       await invalidateTrackingData(queryClient);
+      if (queued) {
+        toast({ message: "Saved on this device — this meal will sync once you're back online." });
+      }
       router.back();
     },
     onError: (err) => {
@@ -247,13 +274,19 @@ export default function AddMealScreen() {
     setQuickCalories('');
   };
 
-  const handleTemplateApply = async (
-    items: { name: string; calories: number; protein_g: number; carbs_g: number; fat_g: number; servings?: number }[],
-  ) => {
-    setTemplateLogging(true);
-    try {
-      for (const item of items) {
-        await api.addMeal({
+  type TemplateItem = { name: string; calories: number; protein_g: number; carbs_g: number; fat_g: number; servings?: number };
+
+  // BUG-18: applying a template loops several independent POSTs with no rollback — if
+  // item 3 of 5 fails, 1 and 2 are already logged server-side, so silently surfacing one
+  // generic error (with no refresh) left the user unsure what actually got saved. This
+  // logs every item regardless of an earlier failure, reports exactly which ones didn't
+  // make it, and always refreshes so partial successes are visible rather than hidden
+  // behind a dead-end error screen. Each item gets its own idempotency key so retrying
+  // only the failed ones can't duplicate the ones that already succeeded.
+  const applyTemplateItems = async (toApply: TemplateItem[]): Promise<TemplateItem[]> => {
+    const results = await Promise.allSettled(
+      toApply.map((item) =>
+        api.addMeal({
           date,
           meal_type: mealType,
           name: item.name,
@@ -262,13 +295,53 @@ export default function AddMealScreen() {
           protein_g: +item.protein_g.toFixed(1),
           carbs_g: +item.carbs_g.toFixed(1),
           fat_g: +item.fat_g.toFixed(1),
-        });
-      }
+          idempotency_key: createIdempotencyKey(),
+        })
+      )
+    );
+    return toApply.filter((_, i) => results[i].status === 'rejected');
+  };
+
+  const handleTemplateApply = async (items: TemplateItem[]) => {
+    setTemplateLogging(true);
+    try {
+      const failed = await applyTemplateItems(items);
       await invalidateTrackingData(queryClient);
-      haptics.success();
-      router.back();
-    } catch (err) {
-      Alert.alert('Template error', extractErrorMessage(err));
+      if (failed.length === 0) {
+        haptics.success();
+        router.back();
+        return;
+      }
+      haptics.error();
+      const succeededCount = items.length - failed.length;
+      Alert.alert(
+        succeededCount > 0 ? 'Some items didn’t save' : "Couldn't log this template",
+        `${succeededCount} of ${items.length} logged.${succeededCount > 0 ? ' The rest ' : ' '}${failed
+          .map((f) => f.name)
+          .join(', ')} didn't go through.`,
+        [
+          succeededCount > 0 ? { text: 'Keep what saved', onPress: () => router.back() } : { text: 'OK', style: 'cancel' },
+          {
+            text: 'Retry the rest',
+            onPress: async () => {
+              setTemplateLogging(true);
+              try {
+                const stillFailed = await applyTemplateItems(failed);
+                await invalidateTrackingData(queryClient);
+                if (stillFailed.length === 0) {
+                  haptics.success();
+                  router.back();
+                } else {
+                  haptics.error();
+                  Alert.alert('Still having trouble', `${stillFailed.map((f) => f.name).join(', ')} still didn't save. Check your connection and try again from the template.`);
+                }
+              } finally {
+                setTemplateLogging(false);
+              }
+            },
+          },
+        ]
+      );
     } finally {
       setTemplateLogging(false);
     }

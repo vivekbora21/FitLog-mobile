@@ -74,9 +74,7 @@ export function DayActionModal({ visible, dateKey, dayInfo, onClose, onStatusUpd
     },
   });
 
-  const rawStatus: DayStatus = dayInfo?.status || 'UPCOMING';
-  const currentStatus: DayStatus =
-    rawStatus === 'UPCOMING' && parsedDate.getDay() === 0 ? 'REST' : rawStatus;
+  const currentStatus: DayStatus = dayInfo?.status || 'UPCOMING';
   const hasWorkout = !!dayInfo?.has_workout;
   const programDay = dayInfo?.program_day;
 

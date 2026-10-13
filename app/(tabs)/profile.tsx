@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
@@ -23,10 +23,12 @@ import {
   KeyRound,
   Trash2,
   User as UserIcon,
+  RefreshCw,
 } from 'lucide-react-native';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/api/client';
 import { useAuth } from '../../src/providers/auth';
+import { getFailedCount, getPendingCount } from '../../src/lib/offlineQueue';
 import { Avatar, Badge, Button, PressableScale, ProgressRing, ScreenHeader } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, type ThemePreference, makeStyles, useTheme } from '../../src/theme';
@@ -46,6 +48,12 @@ export default function ProfileScreen() {
   const styles = useStyles();
   const { user, logout } = useAuth();
   const router = useRouter();
+  const [queueCounts, setQueueCounts] = useState({ pending: 0, failed: 0 });
+  useFocusEffect(
+    useCallback(() => {
+      setQueueCounts({ pending: getPendingCount(), failed: getFailedCount() });
+    }, [])
+  );
   const bottomClearance = useTabBarClearance();
 
   const changeTheme = (value: ThemePreference) => {
@@ -115,14 +123,22 @@ export default function ProfileScreen() {
 
         {/* Identity */}
         <Animated.View entering={enter(0)} style={styles.heroCard}>
-          <Svg style={styles.heroGlow} width="100%" height="100%" pointerEvents="none">
+          <Svg
+            style={styles.heroGlow}
+            width="100%"
+            height="100%"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            pointerEvents="none"
+          >
             <Defs>
-              <RadialGradient id="profileGlow" cx="50%" cy="0%" rx="75%" ry="60%">
+              <RadialGradient id="profileGlow" cx="50%" cy="0%" rx="100%" ry="100%">
                 <Stop offset="0" stopColor={colors.primaryLight} stopOpacity={0.3} />
+                <Stop offset="0.5" stopColor={colors.primaryLight} stopOpacity={0.08} />
                 <Stop offset="1" stopColor={colors.primaryLight} stopOpacity={0} />
               </RadialGradient>
             </Defs>
-            <Rect x="0" y="0" width="100%" height="100%" fill="url(#profileGlow)" />
+            <Rect x="0" y="0" width="100" height="100" fill="url(#profileGlow)" />
           </Svg>
           <Avatar name={name} imageUrl={user?.avatar_url} size={88} ring />
           <Text style={styles.userName}>{name}</Text>
@@ -218,6 +234,20 @@ export default function ProfileScreen() {
               onPress={() => router.push('/plan')}
               right={<ChevronRight size={18} color={colors.textMuted} />}
             />
+            {(queueCounts.pending > 0 || queueCounts.failed > 0) && (
+              <SettingsRow
+                icon={<RefreshCw size={18} color={queueCounts.failed > 0 ? colors.error : colors.amber} />}
+                iconTint={queueCounts.failed > 0 ? colors.errorBackground : colors.amberGlow}
+                title="Sync status"
+                subtitle={
+                  queueCounts.failed > 0
+                    ? `${queueCounts.failed} need${queueCounts.failed === 1 ? 's' : ''} your attention`
+                    : `${queueCounts.pending} waiting to sync`
+                }
+                onPress={() => router.push('/account/sync-status')}
+                right={<ChevronRight size={18} color={colors.textMuted} />}
+              />
+            )}
           </View>
         </Animated.View>
 

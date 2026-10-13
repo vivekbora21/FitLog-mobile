@@ -790,7 +790,7 @@ export default function WorkoutsScreen() {
         )}
 
         {/* Cardio (collapsed by default so it doesn't crowd today's exercises) */}
-        <Animated.View entering={enter(2)}>
+        <Animated.View entering={enter(2)} style={styles.cardioSectionWrap}>
           <CardioSection />
         </Animated.View>
 
@@ -1206,32 +1206,44 @@ function OpenDayRow({
   const styles = useStyles();
 
   return (
-    <View style={styles.openDayRow}>
-      <PressableScale
-        onPress={onPress}
-        scaleTo={0.99}
-        accessibilityHint="Opens day options"
-        style={styles.historyMainPressable}
-      >
-        <View style={styles.openDayDateCol}>
-          <Text style={styles.openDayDateText}>
-            {date.toLocaleDateString('en-US', { month: 'short' })} {date.getDate()}
-          </Text>
-          {programDayNum ? <Text style={styles.openDayDayNum}>D{programDayNum}</Text> : null}
-        </View>
-        <Text style={styles.openDayMeta} numberOfLines={1}>
-          No workout logged · Tap to record or mark rest
-        </Text>
-      </PressableScale>
-      <PressableScale
-        onPress={onLogWorkout}
-        style={styles.logPillBtnSecondary}
-        accessibilityLabel={`Log workout for ${formatShortDay(dateKey)}`}
-      >
-        <Plus size={13} color={colors.primaryLight} strokeWidth={2.6} />
-        <Text style={styles.logPillBtnSecondaryText}>Log</Text>
-      </PressableScale>
-    </View>
+    <Card style={styles.historyCard}>
+      <View style={styles.historyRow}>
+        <PressableScale
+          onPress={onPress}
+          scaleTo={0.99}
+          accessibilityHint="Opens day options"
+          style={styles.historyMainPressable}
+        >
+          <View style={styles.dateTile}>
+            <Text style={styles.dateTileMonth}>
+              {date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}
+            </Text>
+            <Text style={styles.dateTileDay}>{date.getDate()}</Text>
+            {programDayNum ? (
+              <View style={styles.dateTileProgramBadge}>
+                <Text style={styles.dateTileProgramText}>D{programDayNum}</Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={styles.historyInfo}>
+            <Text style={styles.historyTitle} numberOfLines={1}>
+              No Workout Logged
+            </Text>
+            <Text style={styles.historyMeta} numberOfLines={1}>
+              Tap to record or mark rest
+            </Text>
+          </View>
+        </PressableScale>
+        <PressableScale
+          onPress={onLogWorkout}
+          style={styles.logPillBtnSecondary}
+          accessibilityLabel={`Log workout for ${formatShortDay(dateKey)}`}
+        >
+          <Plus size={13} color={colors.primaryLight} strokeWidth={2.6} />
+          <Text style={styles.logPillBtnSecondaryText}>Log</Text>
+        </PressableScale>
+      </View>
+    </Card>
   );
 }
 
@@ -1635,6 +1647,9 @@ const useStyles = makeStyles(({ colors }) => ({
   calendarContainer: {
     marginTop: spacing.md,
   },
+  cardioSectionWrap: {
+    marginTop: spacing.md,
+  },
   backTodayBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1752,33 +1767,6 @@ const useStyles = makeStyles(({ colors }) => ({
     color: colors.textMuted,
     fontWeight: '600',
     marginTop: 2,
-  },
-  openDayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm + 2,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  openDayDateCol: {
-    width: 72,
-  },
-  openDayDateText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  openDayDayNum: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textMuted,
-    marginTop: 1,
-  },
-  openDayMeta: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.textMuted,
   },
   historyActionsRow: {
     flexDirection: 'row',

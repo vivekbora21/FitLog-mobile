@@ -107,27 +107,28 @@ export function CardioSection() {
   return (
     <View style={styles.sectionWrap}>
       {/* Collapsible header */}
-      <PressableScale
-        haptic="selection"
+      <Card
         onPress={() => setExpanded((v) => !v)}
-        style={styles.toggleRow}
-        accessibilityLabel={expanded ? 'Collapse cardio' : 'Expand cardio'}
+        style={styles.toggleCard}
+        accessibilityHint={expanded ? 'Collapse cardio' : 'Expand cardio'}
       >
-        <View style={styles.toggleIconBox}>
-          <HeartPulse size={18} color={colors.primaryLight} />
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleIconBox}>
+            <HeartPulse size={18} color={colors.primaryLight} />
+          </View>
+          <View style={styles.toggleTextCol}>
+            <Text style={styles.toggleTitle}>Cardio</Text>
+            <Text style={styles.toggleMeta}>
+              {completedCount} session{completedCount === 1 ? '' : 's'} · {totalMinutes} min total
+            </Text>
+          </View>
+          {expanded ? (
+            <ChevronUp size={18} color={colors.textMuted} />
+          ) : (
+            <ChevronDown size={18} color={colors.textMuted} />
+          )}
         </View>
-        <View style={styles.toggleTextCol}>
-          <Text style={styles.toggleTitle}>Cardio</Text>
-          <Text style={styles.toggleMeta}>
-            {completedCount} session{completedCount === 1 ? '' : 's'} · {totalMinutes} min total
-          </Text>
-        </View>
-        {expanded ? (
-          <ChevronUp size={18} color={colors.textMuted} />
-        ) : (
-          <ChevronDown size={18} color={colors.textMuted} />
-        )}
-      </PressableScale>
+      </Card>
 
       {!expanded ? null : (
         <>
@@ -360,15 +361,13 @@ const useStyles = makeStyles(({ colors }) => ({
   sectionWrap: {
     gap: spacing.lg,
   },
+  toggleCard: {
+    padding: spacing.md,
+  },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
   },
   toggleIconBox: {
     width: 36,

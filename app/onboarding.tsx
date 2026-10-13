@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { FadeInDown, FadeInRight, ZoomIn } from 'react-native-reanimated';
-import { ArrowRight, Check, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Scale } from 'lucide-react-native';
 import { api, extractErrorMessage } from '../src/api/client';
 import { Button, ChipGroup, Input, PressableScale, ProgressBar, SheetScreen } from '../src/components/ui';
 import { radius, spacing, makeStyles, useTheme } from '../src/theme';
-import type { Blueprint, JourneyMode, UserProfile } from '../src/types';
+import type { CreatePlanPayload, UserProfile } from '../src/types';
 import { calculateAge, formatDobDisplay, isValidDateKey, parseNumberInput, toDateKey } from '../src/lib/format';
 import { useAuth } from '../src/providers/auth';
 import { invalidateTrackingData } from '../src/lib/queries';
@@ -15,18 +15,27 @@ import { haptics } from '../src/lib/haptics';
 import { setFlag } from '../src/lib/secureStore';
 import { onboardingSkipKey } from '../src/lib/onboarding';
 import {
-  DetailsStep,
-  ModeStep,
-  RoadmapPreview,
-  defaultWizardDetails,
-  validateDetails,
-  type WizardDetails,
-  type WizardPath,
+  DEFAULT_DURATION_DAYS_BY_MODE,
+  GoalStep,
+  RECOMP_DIRECTION_OPTIONS,
+  ReviewStep,
+  ScheduleStep,
+  TrainingStyleStep,
+  buildPreviewPayload,
+  defaultPlanWizardState,
+  gateFromQuery,
+  usePlanPreview,
+  type BuilderMode,
+  type PlanWizardState,
 } from '../src/components/plan-wizard';
 
 type ActivityLevel = NonNullable<UserProfile['activity_level']>;
 type Sex = 'MALE' | 'FEMALE';
-type PlanSubStep = 'select' | 'details' | 'preview';
+/** Spec v1.6 D3 removed the separate "ready-made vs custom" entry screen;
+ * onboarding's own plan sub-wizard now walks the same four builder steps
+ * (minus "About you", whose fields -- sex/age/height/weight -- onboarding
+ * already collected in its own step 0) plus an escape hatch to skip. */
+type PlanSubStep = 'goal' | 'schedule' | 'style' | 'review';
 
 const SEX_OPTIONS: { value: Sex; label: string }[] = [
   { value: 'MALE', label: 'Male' },
@@ -116,14 +125,11 @@ export default function OnboardingScreen() {
   const [activity, setActivity] = useState<ActivityLevel>(profile?.activity_level ?? 'MODERATE');
   const [workouts, setWorkouts] = useState(4);
 
-  // Step 2: Choose Plan (a small self-contained wizard: pick mode -> details -> preview)
-  const [planSubStep, setPlanSubStep] = useState<PlanSubStep>('select');
-  const [planPath, setPlanPath] = useState<WizardPath>('blueprint');
-  const [mode, setMode] = useState<JourneyMode | null>(null);
-  const [blueprintSlug, setBlueprintSlug] = useState<string | null>(null);
+  // Step 2: Choose Plan (goal -> schedule -> style -> review), or skip it entirely.
+  const [planSubStep, setPlanSubStep] = useState<PlanSubStep>('goal');
   const [skipPlan, setSkipPlan] = useState(false);
-  const [planDetails, setPlanDetails] = useState<WizardDetails>(() => defaultWizardDetails());
-  const [planDetailsError, setPlanDetailsError] = useState<string | null>(null);
+  const [rawPlanState, setRawPlanState] = useState<PlanWizardState>(() => defaultPlanWizardState());
+  const patchPlanState = (patch: Partial<PlanWizardState>) => setRawPlanState((prev) => ({ ...prev, ...patch }));
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -132,65 +138,74 @@ export default function OnboardingScreen() {
   const heightVal = parseNumberInput(height);
   const weightVal = parseNumberInput(weight);
 
-  // Recommended mode based on the user's goal from step 1.
-  const recommendedMode: JourneyMode = useMemo(() => {
+  // Recommended mode based on the user's goal from step 1. Habit is not one
+  // of the plan builder's four goal cards (spec v1.6 section 8.1), so a
+  // goal that used to map to Habit (Endurance / General fitness) gets no
+  // highlighted recommendation rather than a misleading one.
+  const recommendedMode: BuilderMode | null = useMemo(() => {
     if (goal === 'FAT_LOSS') return 'CUT';
     if (goal === 'HYPERTROPHY') return 'BULK';
     if (goal === 'STRENGTH') return 'FOCUS';
-    return 'HABIT';
+    return null;
   }, [goal]);
+
+  // Step 0's sex/age/height/weight fill the plan sub-wizard's shared state
+  // (so "About you" fields are never re-asked), and the goal-recommended
+  // mode pre-highlights a card -- both derived at render time rather than
+  // copied into state via an effect, so an explicit user choice always
+  // wins and nothing fights a profile that is still loading.
+  const planState: PlanWizardState = useMemo(() => {
+    const next = { ...rawPlanState };
+    next.sex = next.sex || sex;
+    next.age = next.age || (dobAge != null ? String(dobAge) : next.age);
+    next.height = next.height || (heightVal != null ? String(heightVal) : next.height);
+    next.currentWeight = next.currentWeight || (weightVal != null ? String(weightVal) : next.currentWeight);
+    if (!next.mode && recommendedMode && !skipPlan) {
+      next.mode = recommendedMode;
+    }
+    return next;
+  }, [rawPlanState, sex, dobAge, heightVal, weightVal, recommendedMode, skipPlan]);
 
   const blueprintsQuery = useQuery({
     queryKey: ['blueprints'],
     queryFn: () => api.getBlueprints(),
-    enabled: step === 2 && planPath === 'blueprint',
+    enabled: step === 2,
+  });
+  const splitsQuery = useQuery({
+    queryKey: ['trainingSplits'],
+    queryFn: () => api.getTrainingSplits(),
+    enabled: step === 2,
   });
 
-  const previewMutation = useMutation({
-    mutationFn: () =>
-      api.previewPlan({
-        blueprint_slug: planPath === 'blueprint' ? blueprintSlug ?? undefined : undefined,
-        mode: planPath === 'custom' ? mode ?? undefined : undefined,
-        duration_days: Math.round(parseNumberInput(planDetails.duration) ?? 0),
-        days_per_week: planDetails.daysPerWeek,
-        weekdays: planDetails.weekdays,
-        current_weight_kg: weightVal ?? 0,
-        goal_weight_kg: parseNumberInput(planDetails.goalWeight) ?? undefined,
-        height_cm: heightVal ?? 0,
-        age: dobAge ?? 0,
-        sex: sex ?? 'MALE',
-      }),
-  });
+  const preview = usePlanPreview(planState, { enabled: step === 2 && !skipPlan });
 
-  // The "select" sub-step pre-highlights the goal-recommended mode's card before the user taps
-  // anything, so once its blueprint loads we need to wire up the matching slug/details ourselves —
-  // otherwise the card looks chosen but blueprintSlug stays null and "Next" silently no-ops.
-  useEffect(() => {
-    if (
-      step === 2 &&
-      planSubStep === 'select' &&
-      planPath === 'blueprint' &&
-      mode &&
-      !blueprintSlug &&
-      !skipPlan
-    ) {
-      const bp = blueprintsQuery.data?.blueprints.find((b) => b.mode === mode);
-      if (bp) {
-        setBlueprintSlug(bp.slug);
-        patchPlanDetails({ duration: String(bp.default_duration_days), daysPerWeek: bp.default_days_per_week });
-      }
-    }
-  }, [step, planSubStep, planPath, mode, blueprintSlug, skipPlan, blueprintsQuery.data]);
+  const currentBlueprint = useMemo(
+    () => blueprintsQuery.data?.blueprints.find((b) => b.mode === planState.mode) ?? null,
+    [blueprintsQuery.data, planState.mode]
+  );
+  const candidateSplits = useMemo(
+    () => (splitsQuery.data?.splits ?? []).filter((s) => s.days_per_week === planState.daysPerWeek),
+    [splitsQuery.data, planState.daysPerWeek]
+  );
+  const recommendedSplitSlug = useMemo(() => {
+    const defaultSlug = currentBlueprint?.default_training_split_slug;
+    if (defaultSlug && candidateSplits.some((s) => s.slug === defaultSlug)) return defaultSlug;
+    return candidateSplits[0]?.slug ?? null;
+  }, [currentBlueprint, candidateSplits]);
 
-  const patchPlanDetails = (patch: Partial<WizardDetails>) => setPlanDetails((prev) => ({ ...prev, ...patch }));
-
-  const onChangeMode = (m: JourneyMode, bp: Blueprint | null) => {
-    setMode(m);
-    setBlueprintSlug(bp?.slug ?? null);
+  const onChangeMode = (mode: BuilderMode) => {
+    haptics.selection();
     setSkipPlan(false);
-    if (bp) {
-      patchPlanDetails({ duration: String(bp.default_duration_days), daysPerWeek: bp.default_days_per_week });
-    }
+    setRawPlanState((prev) => {
+      const next: PlanWizardState = { ...prev, mode };
+      if (!prev.durationEdited) {
+        next.durationDays = String(DEFAULT_DURATION_DAYS_BY_MODE[mode]);
+      }
+      if (mode === 'RECOMP' && !prev.recompDirection) {
+        next.recompDirection = 'lean_out';
+      }
+      return next;
+    });
   };
 
   const validateStep0 = () => {
@@ -246,19 +261,11 @@ export default function OnboardingScreen() {
       await api.applyRecommendedTargets();
 
       // 4. Create the guided plan (if the user didn't choose to skip it)
-      if (!skipPlan && mode) {
-        await api.createPlan({
-          blueprint_slug: planPath === 'blueprint' ? blueprintSlug ?? undefined : undefined,
-          mode: planPath === 'custom' ? mode : undefined,
-          duration_days: Math.round(parseNumberInput(planDetails.duration) ?? 0),
-          days_per_week: planDetails.daysPerWeek,
-          weekdays: planDetails.weekdays,
-          current_weight_kg: weightVal!,
-          goal_weight_kg: parseNumberInput(planDetails.goalWeight) ?? undefined,
-          height_cm: heightVal!,
-          age: dobAge!,
-          sex: sex!,
-        });
+      if (!skipPlan && planState.mode) {
+        const payload = buildPreviewPayload(planState);
+        if (payload) {
+          await api.createPlan(payload as CreatePlanPayload);
+        }
       }
 
       // 5. Mark onboarding as completed/skipped
@@ -286,6 +293,25 @@ export default function OnboardingScreen() {
     },
   });
 
+  // Plan sub-wizard gating, same discipline as plan-select.tsx: local
+  // reasons are presence-only, every semantic rule comes from the engine.
+  const planGate = useMemo(() => {
+    if (skipPlan) return { canAdvance: true, reason: null as string | null };
+    if (planSubStep === 'goal') {
+      if (!planState.mode) return { canAdvance: false, reason: 'Choose a goal to continue.' };
+      return gateFromQuery(null, preview);
+    }
+    if (planSubStep === 'schedule') {
+      if (planState.weekdays.length !== planState.daysPerWeek) {
+        return { canAdvance: false, reason: `Pick ${planState.daysPerWeek} training days (${planState.weekdays.length} selected).` };
+      }
+      if (!planState.experience) return { canAdvance: false, reason: 'Select your experience to continue.' };
+      if (!planState.equipment) return { canAdvance: false, reason: 'Select your equipment to continue.' };
+      return gateFromQuery(null, preview);
+    }
+    return gateFromQuery(null, preview);
+  }, [skipPlan, planSubStep, planState, preview]);
+
   const onNext = () => {
     if (step === 0) {
       if (validateStep0()) {
@@ -298,55 +324,52 @@ export default function OnboardingScreen() {
     }
     if (step === 1) {
       haptics.selection();
-      // Reset the plan sub-wizard and preselect the recommended mode from the goal just picked.
-      setMode(recommendedMode);
-      setBlueprintSlug(null);
-      setPlanPath('blueprint');
-      setPlanSubStep('select');
+      setPlanSubStep('goal');
       setSkipPlan(false);
       setStep(2);
       return;
     }
     // step === 2
+    if (!planGate.canAdvance) {
+      haptics.error();
+      return;
+    }
     if (skipPlan) {
       saveMutation.mutate();
       return;
     }
-    if (planSubStep === 'select') {
-      if (!mode || (planPath === 'blueprint' && !blueprintSlug)) {
-        haptics.error();
-        return;
-      }
+    if (planSubStep === 'goal') {
       haptics.selection();
-      setPlanSubStep('details');
+      setPlanSubStep('schedule');
       return;
     }
-    if (planSubStep === 'details') {
-      const err = validateDetails(planDetails, mode);
-      if (err) {
-        setPlanDetailsError(err);
-        haptics.error();
-        return;
-      }
-      setPlanDetailsError(null);
+    if (planSubStep === 'schedule') {
       haptics.selection();
-      previewMutation.mutate();
-      setPlanSubStep('preview');
+      setPlanSubStep('style');
       return;
     }
-    // planSubStep === 'preview'
+    if (planSubStep === 'style') {
+      haptics.selection();
+      setPlanSubStep('review');
+      return;
+    }
+    // planSubStep === 'review'
     saveMutation.mutate();
   };
 
   const onBack = () => {
     haptics.selection();
     if (step === 2) {
-      if (planSubStep === 'preview') {
-        setPlanSubStep('details');
+      if (planSubStep === 'review') {
+        setPlanSubStep('style');
         return;
       }
-      if (planSubStep === 'details') {
-        setPlanSubStep('select');
+      if (planSubStep === 'style') {
+        setPlanSubStep('schedule');
+        return;
+      }
+      if (planSubStep === 'schedule') {
+        setPlanSubStep('goal');
         return;
       }
       setStep(1);
@@ -367,8 +390,9 @@ export default function OnboardingScreen() {
     if (step === 0) return 'Continue';
     if (step === 1) return 'Next: Choose Plan';
     if (skipPlan) return 'Finish Setup';
-    if (planSubStep === 'select') return 'Next: Plan Details';
-    if (planSubStep === 'details') return 'Preview My Plan';
+    if (planSubStep === 'goal') return 'Next: Schedule';
+    if (planSubStep === 'schedule') return 'Next: Training style';
+    if (planSubStep === 'style') return 'Next: Review';
     return 'Start Plan & Finish';
   })();
 
@@ -385,6 +409,9 @@ export default function OnboardingScreen() {
     </PressableScale>
   );
 
+  const nextDisabled =
+    saveMutation.isPending || (step === 2 && !planGate.canAdvance);
+
   return (
     <SheetScreen
       title={userDisplayName ? `Welcome, ${userDisplayName}` : 'Welcome to FitLog'}
@@ -393,6 +420,9 @@ export default function OnboardingScreen() {
       onClose={skip}
       footer={
         <View style={styles.footerCol}>
+          {step === 2 && !gateHidesReason(skipPlan) && !planGate.canAdvance && planGate.reason ? (
+            <Text style={styles.gateReasonText}>{planGate.reason}</Text>
+          ) : null}
           <View style={styles.footerRow}>
             {step > 0 ? (
               <Button
@@ -409,14 +439,9 @@ export default function OnboardingScreen() {
               title={nextTitle}
               size="lg"
               loading={saveMutation.isPending}
-              disabled={
-                step === 2 &&
-                planSubStep === 'preview' &&
-                !skipPlan &&
-                (previewMutation.isPending || !previewMutation.data)
-              }
+              disabled={nextDisabled}
               onPress={onNext}
-              icon={step < 2 || (step === 2 && !skipPlan && planSubStep !== 'preview') ? (
+              icon={step < 2 || (step === 2 && !skipPlan && planSubStep !== 'review') ? (
                 <ArrowRight size={18} color="#FFFFFF" />
               ) : (
                 <Check size={18} color="#FFFFFF" />
@@ -544,89 +569,88 @@ export default function OnboardingScreen() {
         </Animated.View>
       ) : null}
 
-      {/* STEP 2: CHOOSE PLAN (mode -> details -> preview) */}
+      {/* STEP 2: CHOOSE PLAN (goal -> schedule -> style -> review), or skip */}
       {step === 2 ? (
         <Animated.View entering={FadeInRight.duration(350)}>
-          {planSubStep === 'select' ? (
+          {planSubStep === 'goal' ? (
             <>
-              <Text style={styles.heading}>Choose your starting plan</Text>
-              <Text style={styles.body}>
-                We recommend a mode based on your goal. You can pick a different one, or build a fully custom plan.
-              </Text>
+              <GoalStep value={skipPlan ? null : planState.mode} onChange={onChangeMode} />
 
-              <View style={styles.pathToggleRow}>
-                <PressableScale
-                  haptic="selection"
-                  onPress={() => setPlanPath('blueprint')}
-                  style={[styles.pathToggle, planPath === 'blueprint' && styles.pathToggleActive]}
-                >
-                  <Text style={[styles.pathToggleText, planPath === 'blueprint' && styles.pathToggleTextActive]}>
-                    Ready-made
-                  </Text>
-                </PressableScale>
-                <PressableScale
-                  haptic="selection"
-                  onPress={() => setPlanPath('custom')}
-                  style={[styles.pathToggle, planPath === 'custom' && styles.pathToggleActive]}
-                >
-                  <Text style={[styles.pathToggleText, planPath === 'custom' && styles.pathToggleTextActive]}>
-                    Build my own
-                  </Text>
-                </PressableScale>
-              </View>
+              {!skipPlan && (planState.mode === 'CUT' || planState.mode === 'BULK') ? (
+                <Input
+                  label="Goal weight (kg)"
+                  keyboardType="decimal-pad"
+                  value={planState.goalWeight}
+                  onChangeText={(v) => patchPlanState({ goalWeight: v })}
+                  leftIcon={<Scale size={18} color={colors.primaryLight} />}
+                  hint="Required to pace this goal"
+                />
+              ) : null}
 
-              <ModeStep
-                path={planPath}
-                value={skipPlan ? null : mode}
-                onChange={onChangeMode}
-                blueprints={blueprintsQuery.data?.blueprints}
-                isLoading={blueprintsQuery.isLoading}
-                isError={blueprintsQuery.isError}
-                onRetry={() => blueprintsQuery.refetch()}
-                recommendedMode={recommendedMode}
+              {!skipPlan && planState.mode === 'RECOMP' ? (
+                <ChipGroup
+                  label="Direction"
+                  options={RECOMP_DIRECTION_OPTIONS}
+                  value={planState.recompDirection}
+                  onChange={(v) => patchPlanState({ recompDirection: v })}
+                />
+              ) : null}
+
+              <PressableScale
+                haptic="selection"
+                scaleTo={0.98}
+                onPress={() => setSkipPlan(true)}
+                style={[styles.laterCard, skipPlan && styles.laterCardSelected]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: skipPlan }}
+                accessibilityLabel="I'll choose a plan later"
               >
-                <PressableScale
-                  haptic="selection"
-                  scaleTo={0.98}
-                  onPress={() => setSkipPlan(true)}
-                  style={[styles.laterCard, skipPlan && styles.laterCardSelected]}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: skipPlan }}
-                  accessibilityLabel="I'll choose a plan later"
-                >
-                  <View style={styles.laterContent}>
-                    <View style={styles.laterTextCol}>
-                      <Text style={styles.laterTitle}>I&apos;ll choose a plan later</Text>
-                      <Text style={styles.laterDesc}>
-                        Finish setting up your profile now and select a workout plan later from the Workouts tab.
-                      </Text>
-                    </View>
-                    <View style={[styles.radioCircle, skipPlan && styles.radioCircleActive]}>
-                      {skipPlan ? <Check size={14} color="#FFFFFF" strokeWidth={3} /> : null}
-                    </View>
+                <View style={styles.laterContent}>
+                  <View style={styles.laterTextCol}>
+                    <Text style={styles.laterTitle}>I&apos;ll choose a plan later</Text>
+                    <Text style={styles.laterDesc}>
+                      Finish setting up your profile now and select a workout plan later from the Workouts tab.
+                    </Text>
                   </View>
-                </PressableScale>
-              </ModeStep>
+                  <View style={[styles.radioCircle, skipPlan && styles.radioCircleActive]}>
+                    {skipPlan ? <Check size={14} color="#FFFFFF" strokeWidth={3} /> : null}
+                  </View>
+                </View>
+              </PressableScale>
             </>
           ) : null}
 
-          {planSubStep === 'details' ? (
-            <DetailsStep mode={mode} details={planDetails} onChange={patchPlanDetails} errorMessage={planDetailsError} />
+          {!skipPlan && planSubStep === 'schedule' ? (
+            <ScheduleStep state={planState} onChange={patchPlanState} preview={preview} />
           ) : null}
 
-          {planSubStep === 'preview' ? (
-            <RoadmapPreview
-              roadmap={previewMutation.data}
-              isLoading={previewMutation.isPending}
-              isError={previewMutation.isError}
-              errorMessage={previewMutation.error ? extractErrorMessage(previewMutation.error) : undefined}
-              onRetry={() => previewMutation.mutate()}
+          {!skipPlan && planSubStep === 'style' ? (
+            <TrainingStyleStep
+              state={planState}
+              onChange={patchPlanState}
+              splits={candidateSplits}
+              isLoading={splitsQuery.isLoading}
+              isError={splitsQuery.isError}
+              onRetry={() => splitsQuery.refetch()}
+              recommendedSlug={recommendedSplitSlug}
+              preview={preview}
             />
+          ) : null}
+
+          {!skipPlan && planSubStep === 'review' ? (
+            <ReviewStep state={planState} preview={preview} onRetry={() => preview.refetch()} />
           ) : null}
         </Animated.View>
       ) : null}
     </SheetScreen>
   );
+}
+
+/** The goal sub-step has its own "choose later" affordance instead of a
+ * disabled-Continue reason, and the skip toggle always allows advancing --
+ * so neither needs the generic gate-reason line under the footer. */
+function gateHidesReason(skipPlan: boolean): boolean {
+  return skipPlan;
 }
 
 const useStyles = makeStyles(({ colors }) => ({
@@ -775,32 +799,11 @@ const useStyles = makeStyles(({ colors }) => ({
   backBtn: {
     paddingHorizontal: spacing.md,
   },
-  // Plan path toggle
-  pathToggleRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  pathToggle: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    alignItems: 'center',
-  },
-  pathToggleActive: {
-    backgroundColor: colors.primarySurface,
-    borderColor: colors.primaryLight,
-  },
-  pathToggleText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  pathToggleTextActive: {
-    color: colors.primaryLight,
+  gateReasonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.error,
+    textAlign: 'center',
   },
   // "Choose later" card
   laterCard: {

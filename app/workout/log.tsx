@@ -11,7 +11,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clock, Pencil, Plus, Sparkles } from 'lucide-react-native';
-import { api, extractErrorMessage, type WorkoutSessionPayload } from '../../src/api/client';
+import { api, ApiError, extractErrorMessage, type WorkoutSessionPayload } from '../../src/api/client';
 import { Button, Card, ConfirmModal, DateNavigator, Input, PressableScale, SheetScreen, useToast } from '../../src/components/ui';
 import { makeStyles, radius, spacing, useTheme } from '../../src/theme';
 import {
@@ -28,17 +28,23 @@ import { invalidateTrackingData } from '../../src/lib/queries';
 import { haptics } from '../../src/lib/haptics';
 import {
   clearWorkoutDraft,
+  clearWorkoutEditDraft,
+  createIdempotencyKey,
   draftHasContent,
   exerciseFromRoutine,
   exercisesFromSession,
+  formatDraftAge,
   isCardioExercise,
   loadWorkoutDraft,
+  loadWorkoutEditDraft,
   newCardioSet,
   newSet,
   nextKey,
   saveWorkoutDraft,
+  saveWorkoutEditDraft,
   type DraftExercise,
   type WorkoutDraft,
+  type WorkoutEditDraft,
 } from '../../src/features/workout/draft';
 import { CardioLogModal } from '../../src/features/workout/CardioLogModal';
 import { ExerciseCard } from '../../src/features/workout/ExerciseCard';
@@ -46,7 +52,12 @@ import { ExercisePicker } from '../../src/features/workout/ExercisePicker';
 import { RoutinePicker } from '../../src/features/workout/RoutinePicker';
 import { RestTimerBar, formatClock, useNow, useRestTimer } from '../../src/features/workout/RestTimer';
 import { PrCelebrationModal, type PrCelebrationData } from '../../src/components/progress/PrCelebrationModal';
+import { enqueueOperation } from '../../src/lib/offlineQueue';
 import type { WorkoutSession } from '../../src/types';
+
+function isTransientApiError(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 0 || err.status === 408 || err.status >= 500);
+}
 
 const loggedReps = (reps: string) => (parseNumberInput(reps) ?? 0) > 0;
 
@@ -83,6 +94,10 @@ export default function LogWorkoutScreen() {
   const [startedAt, setStartedAt] = useState(() => initial?.startedAt ?? Date.now());
   const [routineId, setRoutineId] = useState<string | null>(initial?.routineId ?? params.routineId ?? null);
   const [exercises, setExercises] = useState<DraftExercise[]>(initial?.exercises ?? []);
+  // Stable for the lifetime of this draft (including across an app kill, since it's
+  // persisted with it) so a retried "finish workout" submission is recognized as the
+  // same attempt instead of creating a duplicate session.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => initial?.idempotencyKey ?? createIdempotencyKey());
   const [pickerOpen, setPickerOpen] = useState(false);
   const [routinePickerOpen, setRoutinePickerOpen] = useState(false);
   const [cardioExercise, setCardioExercise] = useState<string | null>(null);
@@ -91,6 +106,18 @@ export default function LogWorkoutScreen() {
   const [prefilled, setPrefilled] = useState(resumeNow);
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
   const [closeConfirm, setCloseConfirm] = useState<'discard-edit' | 'leave-draft' | null>(null);
+  // BUG-09: whether the server already considers the saved draft's day done (a real
+  // session, a self-reported Completed day, or a completed program day) elsewhere —
+  // undefined while checking or if the check fails/offline, in which case it's treated
+  // as resumable rather than wrongly blocking the user's own unfinished work.
+  const [draftDayAlreadyDone, setDraftDayAlreadyDone] = useState<boolean | undefined>(undefined);
+  // BUG-10: editing an already-saved workout gets the same local-backup protection as a
+  // new one, in a separate slot (WorkoutEditDraft) so it can't collide with an unrelated
+  // new/live workout's draft. 'checking' blocks applying the server session until we know
+  // whether a local edit-draft exists; 'pending' means one does and awaits the user's
+  // explicit restore/discard choice — it is never silently applied or discarded.
+  const [editDraftStatus, setEditDraftStatus] = useState<'checking' | 'none' | 'pending'>(editId ? 'checking' : 'none');
+  const [pendingEditDraft, setPendingEditDraft] = useState<WorkoutEditDraft | null>(null);
 
   const isToday = date === todayKey;
   const isLive = !editId && live && isToday;
@@ -106,32 +133,63 @@ export default function LogWorkoutScreen() {
     setStartedAt(d.startedAt);
     setRoutineId(d.routineId);
     setExercises(d.exercises);
+    setIdempotencyKey(d.idempotencyKey ?? createIdempotencyKey());
     setReady(true);
   };
+
+  const discardSavedDraft = () => {
+    clearWorkoutDraft();
+    setExercises([]);
+    setTitle('');
+    setNotes('');
+    setReady(true);
+  };
+
+  // BUG-09: this draft's day may already be done server-side (completed on another
+  // device, or via the calendar) — don't offer "Resume" in that case, since finishing
+  // it would create a confusing duplicate for a day already recorded.
+  useEffect(() => {
+    if (!savedDraft || !hasDraft || resumeNow || ready) return;
+    let cancelled = false;
+    api
+      .getWorkoutDayStatus(savedDraft.date)
+      .then((status) => {
+        if (!cancelled) setDraftDayAlreadyDone(status.is_already_done);
+      })
+      .catch(() => {
+        // Offline or the check failed — don't block the user from resuming their own
+        // unfinished work over a connectivity hiccup.
+        if (!cancelled) setDraftDayAlreadyDone(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [savedDraft, hasDraft, resumeNow, ready]);
 
   useEffect(() => {
     if (!savedDraft || !hasDraft || resumeNow || ready) return;
     if (Platform.OS === 'web') return; // Web renders the in-screen prompt card directly
-    Alert.alert(
-      'Resume your workout?',
-      `"${savedDraft.title || 'Workout'}" from ${formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn't finished yet.`,
-      [
-        {
-          text: 'Start fresh',
-          style: 'destructive',
-          onPress: () => {
-            clearWorkoutDraft();
-            setExercises([]);
-            setTitle('');
-            setNotes('');
-            setReady(true);
-          },
-        },
-        { text: 'Resume', onPress: () => resumeDraft(savedDraft) },
-      ],
-      { cancelable: false }
-    );
-  }, [savedDraft, hasDraft, resumeNow, ready]);
+    if (draftDayAlreadyDone === undefined) return; // Still checking — wait rather than flash the wrong prompt.
+
+    if (draftDayAlreadyDone) {
+      Alert.alert(
+        'This day is already recorded',
+        `"${savedDraft.title || 'Workout'}" from ${formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} wasn't finished, but that day is already marked done. Resuming it would create a duplicate.`,
+        [{ text: 'Discard draft', style: 'destructive', onPress: discardSavedDraft }],
+        { cancelable: false }
+      );
+    } else {
+      Alert.alert(
+        'Resume your workout?',
+        `"${savedDraft.title || 'Workout'}" from ${formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn't finished yet.`,
+        [
+          { text: 'Start fresh', style: 'destructive', onPress: discardSavedDraft },
+          { text: 'Resume', onPress: () => resumeDraft(savedDraft) },
+        ],
+        { cancelable: false }
+      );
+    }
+  }, [savedDraft, hasDraft, resumeNow, ready, draftDayAlreadyDone]);
 
   const planQuery = useQuery({
     queryKey: ['workoutPlan'],
@@ -162,6 +220,40 @@ export default function LogWorkoutScreen() {
     enabled: !!editId,
   });
   const session = sessionQuery.data;
+
+  const applyServerSession = (s: WorkoutSession) => {
+    setPrefilled(true);
+    const exs = exercisesFromSession(s);
+    const d = toDateKey(new Date(s.started_at));
+    const mins = String(Math.max(1, Math.round((s.duration_seconds || 0) / 60)));
+    setDate(d);
+    setTitle(s.title ?? '');
+    setNotes(s.notes ?? '');
+    setDuration(mins);
+    setExercises(exs);
+    setInitialSnapshot(JSON.stringify([d, s.title ?? '', s.notes ?? '', mins, exs]));
+  };
+
+  const restoreEditDraft = () => {
+    if (!session || !pendingEditDraft) return;
+    applyServerSession(session); // baseline snapshot is the server's own state, so the
+    // dirty-check below correctly treats the restored (different) values as unsaved.
+    setDate(pendingEditDraft.date);
+    setTitle(pendingEditDraft.title);
+    setNotes(pendingEditDraft.notes);
+    setDuration(pendingEditDraft.duration);
+    setExercises(pendingEditDraft.exercises);
+    setPendingEditDraft(null);
+    setEditDraftStatus('none');
+  };
+
+  const discardEditDraft = () => {
+    if (!session) return;
+    clearWorkoutEditDraft();
+    applyServerSession(session);
+    setPendingEditDraft(null);
+    setEditDraftStatus('none');
+  };
 
   const isWaitingData = editId
     ? sessionQuery.isLoading
@@ -198,26 +290,43 @@ export default function LogWorkoutScreen() {
       setExercises((routine.exercises ?? []).map(exerciseFromRoutine));
       if (planDay?.status !== 'COMPLETED') setRoutineId(planDay?.routine ?? null);
     } else if (session) {
-      setPrefilled(true);
-      const exs = exercisesFromSession(session);
-      const d = toDateKey(new Date(session.started_at));
-      const mins = String(Math.max(1, Math.round((session.duration_seconds || 0) / 60)));
-      setDate(d);
-      setTitle(session.title ?? '');
-      setNotes(session.notes ?? '');
-      setDuration(mins);
-      setExercises(exs);
-      setInitialSnapshot(JSON.stringify([d, session.title ?? '', session.notes ?? '', mins, exs]));
+      if (editDraftStatus === 'checking') {
+        const found = loadWorkoutEditDraft(editId!);
+        if (found) {
+          setPendingEditDraft(found);
+          setEditDraftStatus('pending');
+        } else {
+          setEditDraftStatus('none');
+          applyServerSession(session);
+        }
+      }
+      // editDraftStatus === 'pending': wait for the recovery prompt's restore/discard choice.
+      // editDraftStatus === 'none' after the first pass: already applied, nothing to do.
     }
   }
 
   // 3. Autosave new workouts on every change.
   useEffect(() => {
     if (editId || !ready) return;
-    const draft = { date, startedAt, title, notes, duration, live, routineId, exercises };
+    const draft = { date, startedAt, title, notes, duration, live, routineId, exercises, idempotencyKey };
     if (draftHasContent(draft)) saveWorkoutDraft(draft);
     else clearWorkoutDraft();
-  }, [editId, ready, date, startedAt, title, notes, duration, live, routineId, exercises]);
+  }, [editId, ready, date, startedAt, title, notes, duration, live, routineId, exercises, idempotencyKey]);
+
+  // 3b. Autosave edits to an already-saved workout (BUG-10) — same protection, separate
+  // slot. Guarded on editDraftStatus === 'none' so this can't fire while the recovery
+  // prompt above is still deciding what to apply (which would overwrite the very draft
+  // it's about to offer), and on an actual diff from initialSnapshot so simply opening
+  // and closing an edit screen unchanged doesn't manufacture a recovery prompt next time.
+  useEffect(() => {
+    if (!editId || !ready || editDraftStatus !== 'none' || initialSnapshot === null) return;
+    const unchanged = initialSnapshot === JSON.stringify([date, title, notes, duration, exercises]);
+    if (unchanged) {
+      clearWorkoutEditDraft();
+      return;
+    }
+    saveWorkoutEditDraft({ sessionId: editId, date, title, notes, duration, exercises });
+  }, [editId, ready, editDraftStatus, initialSnapshot, date, title, notes, duration, exercises]);
 
   // "Last time" numbers for every exercise in the workout.
   const exerciseIds = [...new Set(exercises.map((e) => e.exerciseId))].sort();
@@ -348,17 +457,35 @@ export default function LogWorkoutScreen() {
   const [pendingSummaryNav, setPendingSummaryNav] = useState<(() => void) | null>(null);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      editId
-        ? api.updateWorkoutSession(editId, buildPayload())
-        : api.createWorkoutSession({ ...buildPayload(), routine: linkRoutine }),
-    onSuccess: async (data: any) => {
+    mutationFn: async () => {
+      if (editId) {
+        return { session: await api.updateWorkoutSession(editId, buildPayload()), queued: false };
+      }
+      const payload = { ...buildPayload(), routine: linkRoutine, idempotency_key: idempotencyKey };
+      try {
+        return { session: await api.createWorkoutSession(payload), queued: false };
+      } catch (err) {
+        if (!isTransientApiError(err)) throw err;
+        // BUG-11: bad gym wifi must not lose a finished workout. Persisted locally before
+        // we report success; retried automatically once back online (see offlineQueue.ts).
+        // The local draft is cleared since the queue now durably owns this write.
+        enqueueOperation('workout', { session: payload }, payload.title || 'Workout');
+        return { session: null, queued: true };
+      }
+    },
+    onSuccess: async ({ session, queued }: { session: any; queued: boolean }) => {
       haptics.success();
-      if (!editId) clearWorkoutDraft();
+      if (editId) clearWorkoutEditDraft();
+      else clearWorkoutDraft();
       await invalidateTrackingData(queryClient);
-      const goToSummary = () => router.replace({ pathname: '/workout/complete', params: { id: data.id } });
-      if (data?.new_prs && data.new_prs.length > 0) {
-        setCelebratingPr(data.new_prs[0]);
+      if (queued) {
+        toast({ message: "Saved on this device — this workout will sync once you're back online." });
+        router.back();
+        return;
+      }
+      const goToSummary = () => router.replace({ pathname: '/workout/complete', params: { id: session.id } });
+      if (session?.new_prs && session.new_prs.length > 0) {
+        setCelebratingPr(session.new_prs[0]);
         setPendingSummaryNav(() => goToSummary);
       } else {
         goToSummary();
@@ -406,31 +533,35 @@ export default function LogWorkoutScreen() {
   // If there's an unfinished draft, show the prompt directly in-screen so it never hangs
   // waiting for platform alert callbacks that might not fire on web.
   if (!ready && hasDraft && savedDraft) {
+    const dayAlreadyRecorded = draftDayAlreadyDone === true;
     return (
       <SheetScreen title={screenTitle} onClose={() => router.back()}>
         <Card style={styles.resumeCard}>
           <View style={styles.resumeIconWrap}>
             <Sparkles size={24} color={colors.primaryLight} />
           </View>
-          <Text style={styles.resumeTitle}>Resume unfinished workout?</Text>
+          <Text style={styles.resumeTitle}>
+            {dayAlreadyRecorded ? 'This day is already recorded' : 'Resume unfinished workout?'}
+          </Text>
           <Text style={styles.resumeSubtitle}>
-            &ldquo;{savedDraft.title || 'Workout'}&rdquo; from {formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn&apos;t finished yet.
+            {dayAlreadyRecorded
+              ? `"${savedDraft.title || 'Workout'}" from ${formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} wasn't finished, but that day is already marked done. Resuming it would create a duplicate.`
+              : `"${savedDraft.title || 'Workout'}" from ${formatRelativeDay(new Date(savedDraft.startedAt).toISOString()).toLowerCase()} isn't finished yet.`}
           </Text>
           <View style={styles.resumeBtnCol}>
+            {!dayAlreadyRecorded && (
+              <Button
+                title="Resume workout"
+                size="lg"
+                onPress={() => resumeDraft(savedDraft)}
+                style={styles.resumeActionBtn}
+              />
+            )}
             <Button
-              title="Resume workout"
-              size="lg"
-              onPress={() => resumeDraft(savedDraft)}
-              style={styles.resumeActionBtn}
-            />
-            <Button
-              title={params.routineId ? 'Start planned workout' : 'Start fresh'}
+              title={dayAlreadyRecorded ? 'Discard draft' : params.routineId ? 'Start planned workout' : 'Start fresh'}
               variant="secondary"
               size="lg"
-              onPress={() => {
-                clearWorkoutDraft();
-                setReady(true);
-              }}
+              onPress={discardSavedDraft}
               style={styles.resumeActionBtn}
             />
           </View>
@@ -443,6 +574,35 @@ export default function LogWorkoutScreen() {
     return (
       <SheetScreen title={screenTitle} onClose={() => router.back()}>
         <ActivityIndicator color={colors.primaryLight} />
+      </SheetScreen>
+    );
+  }
+
+  // BUG-10: unsaved local edits to this already-saved workout survived an app kill or a
+  // failed save — never silently apply or discard them, let the user choose.
+  if (editDraftStatus === 'pending' && pendingEditDraft) {
+    return (
+      <SheetScreen title={screenTitle} onClose={() => router.back()}>
+        <Card style={styles.resumeCard}>
+          <View style={styles.resumeIconWrap}>
+            <Sparkles size={24} color={colors.primaryLight} />
+          </View>
+          <Text style={styles.resumeTitle}>Restore unsaved edits?</Text>
+          <Text style={styles.resumeSubtitle}>
+            You have unsaved changes to this workout from {formatDraftAge(pendingEditDraft.updatedAt)}. Restore them, or
+            discard and reload the last saved version.
+          </Text>
+          <View style={styles.resumeBtnCol}>
+            <Button title="Restore my edits" size="lg" onPress={restoreEditDraft} style={styles.resumeActionBtn} />
+            <Button
+              title="Discard and reload saved version"
+              variant="secondary"
+              size="lg"
+              onPress={discardEditDraft}
+              style={styles.resumeActionBtn}
+            />
+          </View>
+        </Card>
       </SheetScreen>
     );
   }
@@ -716,6 +876,7 @@ export default function LogWorkoutScreen() {
             label: 'Discard',
             variant: 'danger',
             onPress: () => {
+              clearWorkoutEditDraft();
               setCloseConfirm(null);
               router.back();
             },
