@@ -49,9 +49,18 @@ import {
   Input,
   PeriodFilter,
   PressableScale,
+  ProgressBar,
   ScreenHeader,
 } from '../../src/components/ui';
-import { LineChart, BarChart, type LineChartMode, type BarChartDatum } from '../../src/components/charts';
+import {
+  LineChart,
+  BarChart,
+  HBarChart,
+  formatShortDate,
+  type LineChartMode,
+  type BarChartDatum,
+  type HBarDatum,
+} from '../../src/components/charts';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { useTheme } from '../../src/theme';
 import { useStyles } from '../../src/components/progress/progress.styles';
@@ -106,6 +115,33 @@ function computeWeightTrend(chronological: WeightEntry[]): WeightTrendPoint[] {
     prevDate = currDate;
     const variance = Math.round((w.weight_kg - trend) * 10) / 10;
     return { date: w.date, rawWeight: w.weight_kg, trendWeight: trend, variance };
+  });
+}
+
+function mondayKey(dateKey: string): string {
+  const d = new Date(`${dateKey.slice(0, 10)}T00:00:00`);
+  const dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return toDateKey(d);
+}
+
+type WeeklyWeight = { weekStart: string; avg: number; count: number; change: number | null };
+
+function computeWeeklyAverages(chronological: WeightEntry[]): WeeklyWeight[] {
+  const byWeek = new Map<string, number[]>();
+  for (const w of chronological) {
+    const key = mondayKey(w.date);
+    const list = byWeek.get(key) ?? [];
+    list.push(w.weight_kg);
+    byWeek.set(key, list);
+  }
+  let prev: number | null = null;
+  return [...byWeek.keys()].sort().map((weekStart) => {
+    const list = byWeek.get(weekStart)!;
+    const avg = Math.round((list.reduce((s, v) => s + v, 0) / list.length) * 10) / 10;
+    const change = prev == null ? null : Math.round((avg - prev) * 10) / 10;
+    prev = avg;
+    return { weekStart, avg, count: list.length, change };
   });
 }
 
@@ -733,6 +769,47 @@ function WeightSection({
 
   const baselineWeight = trendPoints[0]?.rawWeight ?? null;
 
+  // Most users are cutting, but a target above the start weight means gains are progress.
+  const lossIsGood = !(targetWeight != null && startWeight != null && targetWeight > startWeight);
+  const goodColor = colors.primaryLight;
+  const badColor = colors.amber;
+  const isGood = (delta: number) => (lossIsGood ? delta < 0 : delta > 0);
+
+  const goalProgress = useMemo(() => {
+    if (targetWeight == null || startWeight == null || currentWeight == null) return null;
+    const total = startWeight - targetWeight;
+    if (total === 0) return null;
+    const done = startWeight - currentWeight;
+    const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+    const remaining = Math.round(Math.abs(currentWeight - targetWeight) * 10) / 10;
+    return { pct, remaining };
+  }, [targetWeight, startWeight, currentWeight]);
+
+  const weekly = useMemo(() => computeWeeklyAverages(chronologicalWeights), [chronologicalWeights]);
+  const weeklyBars: BarChartDatum[] = useMemo(
+    () =>
+      weekly
+        .filter((w) => w.change != null)
+        .slice(-12)
+        .map((w) => ({
+          key: w.weekStart,
+          label: formatShortDate(w.weekStart),
+          value: w.change!,
+          color: w.change === 0 ? colors.textMuted : isGood(w.change!) ? goodColor : badColor,
+          detail: `avg ${w.avg} kg`,
+        })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [weekly, lossIsGood, colors]
+  );
+  const weeklyStats = useMemo(() => {
+    if (weeklyBars.length === 0) return null;
+    const avg = weeklyBars.reduce((s, b) => s + b.value, 0) / weeklyBars.length;
+    const onTrack = weeklyBars.filter((b) => isGood(b.value)).length;
+    const best = weeklyBars.reduce((a, b) => (isGood(b.value - a.value) ? b : a));
+    return { avg: Math.round(avg * 100) / 100, onTrack, best };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weeklyBars, lossIsGood]);
+
   if (isError) {
     return (
       <View style={styles.sectionWrap}>
@@ -817,9 +894,9 @@ function WeightSection({
           <View style={styles.deltaValueRow}>
             {weightDelta != null && weightDelta !== 0 ? (
               weightDelta > 0 ? (
-                <TrendingUp size={12} color={colors.amber} strokeWidth={2.4} />
+                <TrendingUp size={12} color={isGood(weightDelta) ? goodColor : badColor} strokeWidth={2.4} />
               ) : (
-                <TrendingDown size={12} color={colors.primaryLight} strokeWidth={2.4} />
+                <TrendingDown size={12} color={isGood(weightDelta) ? goodColor : badColor} strokeWidth={2.4} />
               )
             ) : (
               <Minus size={12} color={colors.textMuted} strokeWidth={2.4} />
@@ -831,8 +908,7 @@ function WeightSection({
               style={[
                 styles.kpiValue,
                 styles.deltaText,
-                weightDelta != null && weightDelta < 0 && styles.textSuccess,
-                weightDelta != null && weightDelta > 0 && styles.textWarning,
+                weightDelta != null && weightDelta !== 0 && (isGood(weightDelta) ? styles.textSuccess : styles.textWarning),
               ]}
             >
               {weightDelta != null
@@ -875,6 +951,25 @@ function WeightSection({
         )}
       </View>
 
+      {goalProgress && targetWeight != null && (
+        <Animated.View entering={enter(1)}>
+          <Card style={styles.goalCard}>
+            <View style={styles.goalHeader}>
+              <Text style={styles.goalTitle}>Goal Progress</Text>
+              <Text style={styles.goalPct}>{goalProgress.pct}%</Text>
+            </View>
+            <ProgressBar percentage={goalProgress.pct} color={colors.primaryLight} height={10} />
+            <View style={styles.goalFooter}>
+              <Text style={styles.goalMeta}>Start {startWeight} kg</Text>
+              <Text style={styles.goalMetaStrong}>
+                {goalProgress.remaining === 0 ? 'Goal reached' : `${goalProgress.remaining} kg to go`}
+              </Text>
+              <Text style={styles.goalMeta}>Target {targetWeight} kg</Text>
+            </View>
+          </Card>
+        </Animated.View>
+      )}
+
       {/* Trajectory Chart Card */}
       <Animated.View entering={enter(1)}>
         <Card elevated style={styles.chartCard}>
@@ -915,28 +1010,28 @@ function WeightSection({
                   <View
                     style={[
                       styles.chartRatePill,
-                      weeklyRate < 0
-                        ? styles.pillSuccess
-                        : weeklyRate > 0
-                          ? styles.pillWarning
-                          : styles.pillNeutral,
+                      weeklyRate === 0
+                        ? styles.pillNeutral
+                        : isGood(weeklyRate)
+                          ? styles.pillSuccess
+                          : styles.pillWarning,
                     ]}
                   >
                     {weeklyRate < 0 ? (
-                      <TrendingDown size={11} color={colors.primaryLight} strokeWidth={2.5} />
+                      <TrendingDown size={11} color={isGood(weeklyRate) ? goodColor : badColor} strokeWidth={2.5} />
                     ) : weeklyRate > 0 ? (
-                      <TrendingUp size={11} color={colors.amber} strokeWidth={2.5} />
+                      <TrendingUp size={11} color={isGood(weeklyRate) ? goodColor : badColor} strokeWidth={2.5} />
                     ) : (
                       <Minus size={11} color={colors.textMuted} strokeWidth={2.5} />
                     )}
                     <Text
                       style={[
                         styles.chartRatePillText,
-                        weeklyRate < 0
-                          ? styles.textSuccess
-                          : weeklyRate > 0
-                            ? styles.textWarning
-                            : { color: colors.textMuted },
+                        weeklyRate === 0
+                          ? { color: colors.textMuted }
+                          : isGood(weeklyRate)
+                            ? styles.textSuccess
+                            : styles.textWarning,
                       ]}
                     >
                       {weeklyRate > 0 ? `+${weeklyRate}` : `${weeklyRate}`} kg/wk
@@ -985,6 +1080,70 @@ function WeightSection({
           />
         </Card>
       </Animated.View>
+
+      {weeklyBars.length >= 2 && weeklyStats && (
+        <Animated.View entering={enter(2)}>
+          <Card elevated style={styles.chartCard}>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.cardEyebrow}>Week over Week</Text>
+                <Text style={styles.cardTitle}>Weekly Change</Text>
+              </View>
+              <Badge label={`${weeklyBars.length} weeks`} tone="slate" />
+            </View>
+
+            <View style={styles.statStrip}>
+              <View style={styles.statStripItem}>
+                <Text style={styles.statStripLabel}>Avg / week</Text>
+                <Text
+                  style={[
+                    styles.statStripValue,
+                    weeklyStats.avg !== 0 && (isGood(weeklyStats.avg) ? styles.textSuccess : styles.textWarning),
+                  ]}
+                >
+                  {weeklyStats.avg > 0 ? '+' : ''}
+                  {weeklyStats.avg} kg
+                </Text>
+              </View>
+              <View style={styles.statStripDivider} />
+              <View style={styles.statStripItem}>
+                <Text style={styles.statStripLabel}>Best week</Text>
+                <Text style={styles.statStripValue}>
+                  {weeklyStats.best.value > 0 ? '+' : ''}
+                  {weeklyStats.best.value} kg
+                </Text>
+              </View>
+              <View style={styles.statStripDivider} />
+              <View style={styles.statStripItem}>
+                <Text style={styles.statStripLabel}>On track</Text>
+                <Text style={styles.statStripValue}>
+                  {weeklyStats.onTrack}/{weeklyBars.length}
+                </Text>
+              </View>
+            </View>
+
+            <BarChart
+              data={weeklyBars}
+              signed
+              unit=" kg"
+              height={150}
+              formatValue={(v) => `${Math.round(v * 10) / 10}`}
+              accessibilityLabel="Week over week change in average weight"
+            />
+
+            <View style={styles.legendRow}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: goodColor }]} />
+                <Text style={styles.legendText}>{lossIsGood ? 'Down (toward goal)' : 'Up (toward goal)'}</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: badColor }]} />
+                <Text style={styles.legendText}>{lossIsGood ? 'Up' : 'Down'}</Text>
+              </View>
+            </View>
+          </Card>
+        </Animated.View>
+      )}
 
       {/* Log Form Collapse */}
       {isLogging && (
@@ -1218,19 +1377,31 @@ function PrsSection({
   const [showAllPrs, setShowAllPrs] = useState(false);
   const visiblePrs = showAllPrs ? prs : prs.slice(0, HISTORY_PAGE_SIZE);
 
-  const topLiftsChartData: BarChartDatum[] = useMemo(
+  const topLiftsChartData: HBarDatum[] = useMemo(
     () =>
       [...prs]
         .sort((a, b) => (b.estimated_one_rep_max || b.max_weight_kg) - (a.estimated_one_rep_max || a.max_weight_kg))
-        .slice(0, 8)
+        .slice(0, 6)
         .map((pr) => ({
           key: pr.id,
-          label: pr.exercise_name.length > 10 ? `${pr.exercise_name.slice(0, 9)}…` : pr.exercise_name,
+          label: pr.exercise_name,
+          sublabel: `${pr.max_weight_kg} kg × ${pr.reps}`,
           value: Math.round(pr.estimated_one_rep_max || pr.max_weight_kg),
-          active: true,
         })),
     [prs]
   );
+
+  const muscleChartData: HBarDatum[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const pr of prs) {
+      const muscle = pr.primary_muscle || 'Other';
+      counts.set(muscle, (counts.get(muscle) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([muscle, count]) => ({ key: muscle, label: muscle, value: count }));
+  }, [prs]);
 
   return (
     <View style={styles.sectionWrap}>
@@ -1243,14 +1414,34 @@ function PrsSection({
                 <Text style={styles.cardEyebrow}>Strength Ranking</Text>
                 <Text style={styles.cardTitle}>Top Lifts by Est. 1RM</Text>
               </View>
-              <Badge label={`${topLiftsChartData.length} lifts`} tone="amber" />
+              <Badge label={`Top ${topLiftsChartData.length}`} tone="amber" />
             </View>
-            <BarChart
+            <HBarChart
               data={topLiftsChartData}
-              color={colors.warning}
+              color={colors.amber}
               unit=" kg"
               formatValue={(v) => `${Math.round(v)}`}
               accessibilityLabel="Top lifts by estimated one-rep max"
+            />
+          </Card>
+        </Animated.View>
+      )}
+
+      {muscleChartData.length > 1 && (
+        <Animated.View entering={enter(1)}>
+          <Card elevated style={styles.chartCard}>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.cardEyebrow}>Training Balance</Text>
+                <Text style={styles.cardTitle}>Records by Muscle Group</Text>
+              </View>
+              <Badge label={`${allPrsCount} PRs`} tone="slate" />
+            </View>
+            <HBarChart
+              data={muscleChartData}
+              color={colors.cyan}
+              formatValue={(v) => `${v}`}
+              accessibilityLabel="Personal records by muscle group"
             />
           </Card>
         </Animated.View>
@@ -1462,14 +1653,11 @@ function PrsSection({
                         <Text style={styles.prMuscle}>{pr.primary_muscle || 'Compound'}</Text>
                       </View>
                       <View style={styles.prBadgeWrapper}>
-                        <Badge
-                          label={`e1RM ${Math.round(pr.estimated_one_rep_max || pr.max_weight_kg)} kg`}
-                          tone="emerald"
-                        />
-                        <View style={styles.celebratePill}>
-                          <Sparkles size={11} color="#F59E0B" />
-                          <Text style={styles.celebratePillText}>Badge</Text>
-                        </View>
+                        <Text style={styles.prE1rmLabel}>Est. 1RM</Text>
+                        <Text style={styles.prE1rmValue}>
+                          {Math.round(pr.estimated_one_rep_max || pr.max_weight_kg)}
+                          <Text style={styles.prStatUnit}> kg</Text>
+                        </Text>
                       </View>
                     </View>
 
@@ -1495,7 +1683,7 @@ function PrsSection({
                       <View style={styles.prStatCol}>
                         <Text style={styles.prStatLabel}>Date</Text>
                         <Text style={styles.prStatValDate}>
-                          {pr.achieved_at ? pr.achieved_at.slice(0, 10) : '--'}
+                          {pr.achieved_at ? formatShortDate(pr.achieved_at) : '--'}
                         </Text>
                       </View>
                     </View>
@@ -1533,12 +1721,19 @@ function PrsSection({
 // ==========================================
 
 type MeasurementSite = 'waist' | 'chest' | 'arms' | 'hips' | 'thighs';
-const MEASUREMENT_SITES: { key: MeasurementSite; label: string; field: keyof BodyMeasurement }[] = [
-  { key: 'waist', label: 'Waist', field: 'waist_cm' },
-  { key: 'chest', label: 'Chest', field: 'chest_cm' },
-  { key: 'arms', label: 'Arms', field: 'arms_cm' },
-  { key: 'hips', label: 'Hips', field: 'hips_cm' },
-  { key: 'thighs', label: 'Thighs', field: 'thighs_cm' },
+// Recomposition convention: a shrinking waist/hips and growing chest/arms are progress.
+// Thighs can go either way depending on the goal, so they stay neutral.
+const MEASUREMENT_SITES: {
+  key: MeasurementSite;
+  label: string;
+  field: keyof BodyMeasurement;
+  better: 'down' | 'up' | null;
+}[] = [
+  { key: 'waist', label: 'Waist', field: 'waist_cm', better: 'down' },
+  { key: 'chest', label: 'Chest', field: 'chest_cm', better: 'up' },
+  { key: 'arms', label: 'Arms', field: 'arms_cm', better: 'up' },
+  { key: 'hips', label: 'Hips', field: 'hips_cm', better: 'down' },
+  { key: 'thighs', label: 'Thighs', field: 'thighs_cm', better: null },
 ];
 const MEASUREMENT_SITE_OPTIONS = MEASUREMENT_SITES.map((s) => ({ value: s.key, label: s.label }));
 
@@ -1618,11 +1813,25 @@ function MeasurementsSection({
     return { first, latest, delta };
   };
 
-  const waistDelta = calculateDelta('waist_cm');
-  const chestDelta = calculateDelta('chest_cm');
-  const armsDelta = calculateDelta('arms_cm');
-  const hipsDelta = calculateDelta('hips_cm');
-  const thighsDelta = calculateDelta('thighs_cm');
+  const changeChartData: HBarDatum[] = MEASUREMENT_SITES.flatMap((site) => {
+    const d = calculateDelta(site.field);
+    if (!d) return [];
+    const improving = site.better === 'down' ? d.delta < 0 : site.better === 'up' ? d.delta > 0 : null;
+    return [
+      {
+        key: site.key,
+        label: site.label,
+        sublabel: `${d.latest} cm now`,
+        value: d.delta,
+        color:
+          d.delta === 0 || improving == null
+            ? colors.cyan
+            : improving
+              ? colors.primaryLight
+              : colors.amber,
+      },
+    ];
+  });
 
   const [measurementSite, setMeasurementSite] = useState<MeasurementSite>('waist');
   const [measurementPeriod, setMeasurementPeriod] = useState<MeasurementPeriod>('ALL');
@@ -1648,17 +1857,39 @@ function MeasurementsSection({
 
   return (
     <View style={styles.sectionWrap}>
-      {/* Deltas Grid */}
-      <Animated.View entering={enter(0)}>
-        <Text style={styles.sectionTitle}>Symmetry &amp; Circumferences</Text>
-        <View style={styles.metricsGrid}>
-          <MeasurementSummaryCard label="Waist" delta={waistDelta} />
-          <MeasurementSummaryCard label="Chest" delta={chestDelta} />
-          <MeasurementSummaryCard label="Arms" delta={armsDelta} />
-          <MeasurementSummaryCard label="Thighs" delta={thighsDelta} />
-          <MeasurementSummaryCard label="Hips" delta={hipsDelta} />
-        </View>
-      </Animated.View>
+      {changeChartData.length > 0 && (
+        <Animated.View entering={enter(0)}>
+          <Card elevated style={styles.chartCard}>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.cardEyebrow}>Circumferences</Text>
+                <Text style={styles.cardTitle}>Change Since First Log</Text>
+              </View>
+              <Badge label={`${measurements.length} logs`} tone="cyan" />
+            </View>
+            <HBarChart
+              data={changeChartData}
+              signed
+              unit=" cm"
+              accessibilityLabel="Change in each body measurement since the first log"
+            />
+            <View style={styles.legendRow}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: colors.primaryLight }]} />
+                <Text style={styles.legendText}>Progress</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: colors.amber }]} />
+                <Text style={styles.legendText}>Opposite way</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: colors.cyan }]} />
+                <Text style={styles.legendText}>Neutral</Text>
+              </View>
+            </View>
+          </Card>
+        </Animated.View>
+      )}
 
       {/* Trend Chart */}
       <Animated.View entering={enter(1)}>
@@ -1913,40 +2144,6 @@ function MeasurementsSection({
           </PressableScale>
         )}
       </Animated.View>
-    </View>
-  );
-}
-
-function MeasurementSummaryCard({
-  label,
-  delta,
-}: {
-  label: string;
-  delta: { first: number; latest: number; delta: number } | null;
-}) {
-  const styles = useStyles();
-  return (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricCardLabel}>{label}</Text>
-      <Text style={styles.metricCardValue}>
-        {delta != null ? `${delta.latest}` : '--'}
-        <Text style={styles.metricCardUnit}> cm</Text>
-      </Text>
-      <View style={styles.metricCardDeltaRow}>
-        {delta != null ? (
-          <Text
-            style={[
-              styles.metricCardDeltaText,
-              delta.delta > 0 && styles.textSuccess,
-              delta.delta < 0 && styles.textWarning,
-            ]}
-          >
-            {delta.delta > 0 ? `+${delta.delta}` : `${delta.delta}`} cm from start
-          </Text>
-        ) : (
-          <Text style={styles.metricCardSub}>No data</Text>
-        )}
-      </View>
     </View>
   );
 }

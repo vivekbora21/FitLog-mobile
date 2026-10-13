@@ -31,6 +31,40 @@ export function scaleLinear(domain: Domain, range: Domain): (value: number) => n
   return (value: number) => range.min + ((value - domain.min) / domainSpan) * rangeSpan;
 }
 
+const NICE_FACTORS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+
+/** Rounds a positive value up to a human-friendly axis bound (e.g. 2,520 -> 3,000; 1.16 -> 1.2). */
+export function niceCeil(value: number): number {
+  if (value <= 0) return 0;
+  const exp = Math.pow(10, Math.floor(Math.log10(value)));
+  const f = value / exp;
+  return (NICE_FACTORS.find((n) => n >= f - 1e-9) ?? 10) * exp;
+}
+
+/**
+ * Drops labels that would sit closer than `minGap` px to a neighbour. The last label
+ * always survives (it's the most recent data point), so its crowded predecessor goes.
+ */
+export function spaceLabels<L extends { index: number }>(
+  labels: L[],
+  xFor: (index: number) => number,
+  minGap: number
+): L[] {
+  if (labels.length <= 1) return labels;
+  const kept: L[] = [];
+  const last = labels[labels.length - 1];
+  const lastX = xFor(last.index);
+  for (const l of labels.slice(0, -1)) {
+    const x = xFor(l.index);
+    const prev = kept[kept.length - 1];
+    if (prev && x - xFor(prev.index) < minGap) continue;
+    if (lastX - x < minGap) continue;
+    kept.push(l);
+  }
+  kept.push(last);
+  return kept;
+}
+
 /** Picks up to `maxLabels` evenly-spaced indices from `items`, always including the last one. */
 export function buildEvenLabels<T>(
   items: T[],

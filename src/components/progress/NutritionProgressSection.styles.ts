@@ -98,12 +98,17 @@ export const useStyles = makeStyles(({ colors }) => ({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.sm,
     marginBottom: spacing.sm,
   },
   chartHeaderLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  chartHeaderText: {
+    flex: 1,
   },
   chartIconBadge: {
     width: 32,

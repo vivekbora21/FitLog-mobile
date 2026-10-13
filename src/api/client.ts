@@ -40,6 +40,7 @@ import type {
   PlanPreviewResult,
   CreatePlanPayload,
   CreatePlanResponse,
+  RecommendedTargets,
 } from '../types';
 
 export type MealType = MealEntry['meal_type'];
@@ -638,6 +639,10 @@ class ApiClient {
   }
 
   // Recalculates calories/macros from the profile (BMR -> TDEE -> goal) and saves them.
+  async getRecommendedTargets(): Promise<RecommendedTargets> {
+    return this.get<RecommendedTargets>('/nutrition/macro-targets/recommended/');
+  }
+
   async applyRecommendedTargets(): Promise<MacroTarget> {
     return this.post<MacroTarget>('/nutrition/macro-targets/recommended/');
   }

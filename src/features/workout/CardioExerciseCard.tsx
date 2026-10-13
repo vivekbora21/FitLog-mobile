@@ -26,6 +26,7 @@ import { formatRelativeDay, parseNumberInput } from '../../lib/format';
 import { newSet, type DraftExercise, type DraftSet } from './draft';
 import { formatClock } from './RestTimer';
 import { useAuth } from '../../providers/auth';
+import { cardioProfileFromUser, estimateDraftSetCalories, type CardioCalorieMethod } from './cardioCalories';
 
 const INCLINE_PRESETS = [
   { label: '0%', value: '0', desc: 'Flat' },
@@ -44,6 +45,12 @@ const INTENSITY_ZONES = [
 ];
 
 const DURATION_PRESETS = [5, 10, 15, 20, 25, 30, 45];
+
+const METHOD_LABELS: Record<CardioCalorieMethod, string> = {
+  heart_rate: 'from heart rate',
+  speed_incline: 'from speed & incline',
+  met: 'from time & intensity',
+};
 
 interface Props {
   exercise: DraftExercise;
@@ -69,15 +76,10 @@ export function CardioExerciseCard({
   const { colors } = useTheme();
   const styles = useStyles();
   const { user } = useAuth();
-  const weightKg = user?.profile?.weight_kg;
-
-  // Calories = MET * weight (kg) * duration (hours). Only used as a starting
-  // suggestion — never overwrites a value the person already typed in.
-  const estimateCalories = (durationMinutesStr: string): string | undefined => {
-    const mins = parseFloat(durationMinutesStr);
-    if (!ex.metValue || !weightKg || !mins || mins <= 0) return undefined;
-    return String(Math.round(ex.metValue * weightKg * (mins / 60)));
-  };
+  const cardioProfile = cardioProfileFromUser(user?.profile);
+  // Calories are calculated live from what's logged on each interval; a typed
+  // value in the Calories field is treated as an override.
+  const estimateFor = (s: DraftSet) => estimateDraftSetCalories(ex, s, cardioProfile);
 
   const [activeIntervalIndex, setActiveIntervalIndex] = useState(0);
   const [showExtras, setShowExtras] = useState(false);
@@ -122,6 +124,30 @@ export function CardioExerciseCard({
   }, [isTimerRunning, activeIntervalIndex, updateInterval]);
 
   const activeSet = ex.sets[activeIntervalIndex] || ex.sets[0];
+  const activeEstimate = activeSet ? estimateFor(activeSet) : null;
+
+  // Card total: typed overrides where present, live estimates everywhere else.
+  let totalKcal = 0;
+  const methods = new Set<CardioCalorieMethod | 'manual'>();
+  for (const s of ex.sets) {
+    const typed = s.calories ? parseNumberInput(s.calories) : null;
+    if (typed != null) {
+      totalKcal += typed;
+      methods.add('manual');
+      continue;
+    }
+    const est = estimateFor(s);
+    if (est) {
+      totalKcal += est.kcal;
+      methods.add(est.method);
+    }
+  }
+  const totalSource =
+    methods.size === 1
+      ? [...methods][0] === 'manual'
+        ? 'entered manually'
+        : METHOD_LABELS[[...methods][0] as CardioCalorieMethod]
+      : 'estimated';
 
   const handleInclinePreset = (val: string) => {
     if (activeSet) {
@@ -137,8 +163,7 @@ export function CardioExerciseCard({
 
   const handleDurationPreset = (mins: number) => {
     if (activeSet) {
-      const suggested = activeSet.calories ? {} : { calories: estimateCalories(String(mins)) };
-      updateSet(activeSet.key, { durationMinutes: String(mins), ...suggested });
+      updateSet(activeSet.key, { durationMinutes: String(mins) });
     }
   };
 
@@ -147,8 +172,7 @@ export function CardioExerciseCard({
       setIsTimerRunning(false);
       if (elapsedSeconds > 30 && activeSet) {
         const roundedMins = Math.max(1, Math.round(elapsedSeconds / 60));
-        const suggested = activeSet.calories ? {} : { calories: estimateCalories(String(roundedMins)) };
-        updateSet(activeSet.key, { durationMinutes: String(roundedMins), ...suggested });
+        updateSet(activeSet.key, { durationMinutes: String(roundedMins) });
       }
     } else {
       setIsTimerRunning(true);
@@ -370,10 +394,7 @@ export function CardioExerciseCard({
             <TextInput
               style={[styles.input, styles.inputCol]}
               value={s.durationMinutes}
-              onChangeText={(durationMinutes) => {
-                const suggested = s.calories ? {} : { calories: estimateCalories(durationMinutes) };
-                updateSet(s.key, { durationMinutes, ...suggested });
-              }}
+              onChangeText={(durationMinutes) => updateSet(s.key, { durationMinutes })}
               onFocus={() => setActiveIntervalIndex(si)}
               keyboardType="number-pad"
               placeholder="15"
@@ -437,6 +458,22 @@ export function CardioExerciseCard({
         );
       })}
 
+      {/* Live calorie total */}
+      <View style={styles.calorieBar}>
+        <Flame size={13} color={colors.amber} />
+        {totalKcal > 0 ? (
+          <Text style={styles.calorieText}>
+            <Text style={styles.calorieValue}>≈ {Math.round(totalKcal)} kcal</Text> {totalSource}
+          </Text>
+        ) : (
+          <Text style={styles.calorieText}>
+            {cardioProfile.weightKg
+              ? 'Enter a duration to calculate calories'
+              : 'Add your body weight in your profile to auto-calculate calories'}
+          </Text>
+        )}
+      </View>
+
       {/* Quick Duration Stepper Chips */}
       <View style={styles.quickDurationRow}>
         <Text style={styles.quickDurationLabel}>Quick Minutes:</Text>
@@ -470,7 +507,7 @@ export function CardioExerciseCard({
         accessibilityLabel="Toggle heart rate, distance, and calories"
       >
         <Text style={styles.extrasToggleText}>
-          {showExtras ? 'Hide Heart Rate & Calories' : 'Add Heart Rate, Distance & Calories'}
+          {showExtras ? 'Hide Heart Rate & Calories' : 'Add Heart Rate, Distance or Override Calories'}
         </Text>
         {showExtras ? (
           <ChevronUp size={14} color={colors.textMuted} />
@@ -514,16 +551,28 @@ export function CardioExerciseCard({
           <View style={styles.extraField}>
             <View style={styles.extraFieldLabelRow}>
               <Flame size={12} color={colors.amber} />
-              <Text style={styles.extraFieldLabel}>Calories (kcal)</Text>
+              <Text style={styles.extraFieldLabel}>
+                {activeSet?.calories ? 'Calories (manual)' : 'Calories (auto)'}
+              </Text>
             </View>
             <TextInput
               style={styles.extraInput}
               value={activeSet?.calories || ''}
               onChangeText={(calories) => activeSet && updateSet(activeSet.key, { calories })}
               keyboardType="number-pad"
-              placeholder={estimateCalories(activeSet?.durationMinutes || '') || 'e.g. 180'}
+              placeholder={activeEstimate ? String(activeEstimate.kcal) : 'e.g. 180'}
               placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Calories override. Leave empty to use the calculated value"
             />
+            {activeSet?.calories ? (
+              <PressableScale
+                haptic="selection"
+                onPress={() => updateSet(activeSet.key, { calories: '' })}
+                accessibilityLabel="Clear calorie override and use calculated value"
+              >
+                <Text style={styles.useAutoText}>Use auto</Text>
+              </PressableScale>
+            ) : null}
           </View>
         </View>
       )}
@@ -921,6 +970,29 @@ const useStyles = makeStyles(({ colors }) => ({
     borderColor: colors.primaryLight,
   },
 
+  // Calorie total
+  calorieBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceElevated,
+  },
+  calorieText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  calorieValue: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+
   // Quick minutes row
   quickDurationRow: {
     flexDirection: 'row',
@@ -991,6 +1063,13 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 10,
     fontWeight: '600',
     color: colors.textMuted,
+  },
+  useAutoText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.primaryLight,
+    textAlign: 'center',
+    marginTop: 4,
   },
   extraInput: {
     height: 34,

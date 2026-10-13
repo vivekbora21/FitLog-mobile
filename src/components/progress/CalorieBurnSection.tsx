@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Flame } from 'lucide-react-native';
-import { Card, Badge, PeriodFilter } from '../ui';
+import { Card, Badge, PeriodFilter, ProgressBar } from '../ui';
 import { BarChart, type BarChartDatum } from '../charts';
 import { useTheme } from '../../theme';
 import { useStyles } from './CalorieBurnSection.styles';
@@ -151,6 +151,7 @@ export function CalorieBurnSection({ dashboardStats, history, isLoading }: Calor
             <Text style={styles.metricUnit}> kcal</Text>
           </Text>
           <Text style={styles.metricTarget}>Goal: {formatNumber(weekTarget)} kcal</Text>
+          <ProgressBar percentage={Math.min(100, pct)} color={colors.rose} height={8} style={{ marginVertical: 6 }} />
           <View style={styles.metricAdherenceRow}>
             <View
               style={[
@@ -197,7 +198,9 @@ export function CalorieBurnSection({ dashboardStats, history, isLoading }: Calor
             <BarChart
               data={buckets}
               color={colors.rose}
-              unit="kcal"
+              unit=""
+              targetValue={granularity === 'DAY' ? Math.round(weekTarget / 7) : granularity === 'WEEK' ? weekTarget : null}
+              targetLabel={granularity === 'DAY' ? 'Daily goal' : 'Weekly goal'}
               formatValue={(v) => formatNumber(Math.round(v))}
               accessibilityLabel="Calories burned history"
             />

@@ -8,7 +8,8 @@ import { PressableScale } from '../ui/PressableScale';
 import { useTheme } from '../../theme';
 import { haptics } from '../../lib/haptics';
 import { useChartLayout } from './useChartLayout';
-import { buildEvenLabels, computeNiceDomain, scaleLinear } from './chartScale';
+import { buildEvenLabels, computeNiceDomain, scaleLinear, spaceLabels } from './chartScale';
+import { CHART_FONT_FAMILY, formatShortDate } from './chartFont';
 import { useStyles } from './LineChart.styles';
 
 export interface LineChartPoint {
@@ -185,8 +186,8 @@ export function LineChart({
   const showDots = showPoints === 'always' || (showPoints === 'auto' && data.length <= 14);
 
   const axisLabels = useMemo(
-    () => buildEvenLabels(data, (d) => d.date.slice(5)),
-    [data]
+    () => spaceLabels(buildEvenLabels(data, (d) => formatShortDate(d.date)), xFor, 52),
+    [data, xFor]
   );
 
   const gridRatios = [0, 0.5, 1];
@@ -267,6 +268,7 @@ export function LineChart({
                   />
                   {points.length > 0 && (
                     <SvgText
+                      fontFamily={CHART_FONT_FAMILY}
                       x={layoutWidth - paddingRight + 4}
                       y={y + 3}
                       fill={colors.textMuted}
@@ -291,7 +293,7 @@ export function LineChart({
                   strokeDasharray="6 3"
                   strokeWidth={1.5}
                 />
-                <SvgText x={paddingLeft + 2} y={targetY - 5} fill={targetColor} fontSize="9" fontWeight="700">
+                <SvgText fontFamily={CHART_FONT_FAMILY} x={paddingLeft + 2} y={targetY - 5} fill={targetColor} fontSize="9" fontWeight="700">
                   {`${targetLabel} ${withUnit(targetValue!)}`}
                 </SvgText>
               </>
@@ -350,7 +352,7 @@ export function LineChart({
                   stroke="#FFFFFF"
                   strokeWidth={2}
                 />
-                <SvgText x={points[0].x} y={points[0].rawY - 14} textAnchor="middle" fill={lineColor} fontSize="12" fontWeight="800">
+                <SvgText fontFamily={CHART_FONT_FAMILY} x={points[0].x} y={points[0].rawY - 14} textAnchor="middle" fill={lineColor} fontSize="12" fontWeight="800">
                   {withUnit(points[0].value)}
                 </SvgText>
               </>
@@ -411,6 +413,7 @@ export function LineChart({
             {/* X-axis date labels, evenly spaced */}
             {axisLabels.map(({ index, label }, i) => (
               <SvgText
+                fontFamily={CHART_FONT_FAMILY}
                 key={`axis-${index}`}
                 x={xFor(index)}
                 y={chartHeight - 10}
@@ -441,7 +444,7 @@ export function LineChart({
             >
               <View style={styles.tooltipHeader}>
                 <Calendar size={11} color={lineColor} />
-                <Text style={styles.tooltipDate}>{activePoint.date}</Text>
+                <Text style={styles.tooltipDate}>{formatShortDate(activePoint.date)}</Text>
               </View>
 
               {(mode === 'raw' || mode === 'both' || !hasTrend) && (

@@ -17,7 +17,7 @@ import {
   Zap,
 } from 'lucide-react-native';
 import { Card, Badge, Button, PressableScale, PeriodFilter } from '../ui';
-import { LineChart } from '../charts';
+import { BarChart, LineChart, formatShortDate, type BarChartDatum } from '../charts';
 import { spacing, useTheme } from '../../theme';
 import { useStyles } from './NutritionProgressSection.styles';
 import { formatNumber } from '../../types';
@@ -85,21 +85,18 @@ export function NutritionProgressSection({
   const [metric, setMetric] = useState<Metric>('calories');
   const [timeframe, setTimeframe] = useState<Timeframe>('4W');
 
-  // Compute weeks from history — only past/current weeks, latest 5
-  const weeks: WeeklyNutritionSummary[] = useMemo(() => {
+  // Past/current weeks, newest first. The list shows 5; the weekly chart shows up to 8.
+  const allPastWeeks: WeeklyNutritionSummary[] = useMemo(() => {
     if (!nutritionHistory?.history) return [];
-    const allWeeks = computeWeeklyNutritionSummaries(
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    return computeWeeklyNutritionSummaries(
       nutritionHistory.history,
       nutritionHistory.targets,
       nutritionHistory.plan?.mode
-    );
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    // Keep only weeks whose start date is not in the future, take the 5 most recent
-    return allWeeks
-      .filter((w) => new Date(w.week_start) <= today)
-      .slice(0, 5);
+    ).filter((w) => new Date(w.week_start) <= today);
   }, [nutritionHistory]);
+  const weeks = useMemo(() => allPastWeeks.slice(0, 5), [allPastWeeks]);
 
   const currentWeek = weeks[0];
   const targetCalories = currentWeek?.target_calories || nutritionHistory?.targets?.daily_calories || 2200;
@@ -111,25 +108,6 @@ export function NutritionProgressSection({
     return [...nutritionHistory.history]
       .filter((d) => d.has_logged)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [nutritionHistory]);
-
-  // Filter daily history by timeframe
-  const getFilteredDays = useCallback(
-    (timeframe: Timeframe): NutritionHistoryDay[] => {
-      const tf = TIMEFRAMES.find((t) => t.key === timeframe)!;
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - tf.days);
-      return sortedHistory.filter((d) => new Date(d.date) >= cutoff);
-    },
-    [sortedHistory]
-  );
-
-  const chartDays = useMemo(() => getFilteredDays(timeframe), [timeframe, getFilteredDays]);
-
-  const loggingStreak = useMemo(() => {
-    if (!nutritionHistory?.history?.length) return 0;
-    const byDate = new Map(nutritionHistory.history.map((d) => [d.date, d]));
-    return computeLoggingStreak((dateKey) => !!byDate.get(dateKey)?.has_logged);
   }, [nutritionHistory]);
 
   const metricConfig = METRICS.find((m) => m.key === metric)!;
@@ -145,6 +123,74 @@ export function NutritionProgressSection({
         return currentWeek?.target_fat || nutritionHistory?.targets?.fat_g || 70;
     }
   }, [metric, targetCalories, targetProtein, currentWeek, nutritionHistory]);
+
+  // Filter daily history by timeframe
+  const getFilteredDays = useCallback(
+    (timeframe: Timeframe): NutritionHistoryDay[] => {
+      const tf = TIMEFRAMES.find((t) => t.key === timeframe)!;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - tf.days);
+      return sortedHistory.filter((d) => new Date(d.date) >= cutoff);
+    },
+    [sortedHistory]
+  );
+
+  const chartDays = useMemo(() => getFilteredDays(timeframe), [timeframe, getFilteredDays]);
+
+  // Short ranges read best as one bar per calendar day, with unlogged days as stubs
+  // so gaps in logging stay visible. Longer ranges fall back to the line chart.
+  const useBars = timeframe === '7D' || timeframe === '4W';
+  const dailyBars: BarChartDatum[] = useMemo(() => {
+    if (!useBars || !nutritionHistory?.history) return [];
+    const tf = TIMEFRAMES.find((t) => t.key === timeframe)!;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - tf.days);
+    return [...nutritionHistory.history]
+      .filter((d) => new Date(d.date) >= cutoff)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((d) => ({
+        key: d.date,
+        label:
+          timeframe === '7D'
+            ? new Date(`${d.date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short' })
+            : formatShortDate(d.date),
+        value: d.has_logged ? Math.round(d[metricConfig.valueKey] as number) : 0,
+        active: d.has_logged,
+        detail: timeframe === '7D' ? formatShortDate(d.date) : undefined,
+      }));
+  }, [useBars, nutritionHistory, timeframe, metricConfig.valueKey]);
+
+  const weeklyBars: BarChartDatum[] = useMemo(() => {
+    const avgKey = { calories: 'avg_calories', protein: 'avg_protein', carbs: 'avg_carbs', fat: 'avg_fat' }[metric] as
+      | 'avg_calories'
+      | 'avg_protein'
+      | 'avg_carbs'
+      | 'avg_fat';
+    return allPastWeeks
+      .slice(0, 8)
+      .reverse()
+      .map((w) => ({
+        key: w.week_start,
+        label: formatShortDate(w.week_start),
+        value: Math.round(w[avgKey] || 0),
+        active: w.logged_count > 0,
+        detail: `${w.logged_count}/7 days logged`,
+      }));
+  }, [allPastWeeks, metric]);
+  const weeksOnTarget = useMemo(() => {
+    const logged = weeklyBars.filter((b) => b.active);
+    const hit = logged.filter((b) =>
+      metric === 'calories' ? b.value <= metricTarget : b.value >= metricTarget * 0.9
+    ).length;
+    return { hit, total: logged.length };
+  }, [weeklyBars, metric, metricTarget]);
+
+  const loggingStreak = useMemo(() => {
+    if (!nutritionHistory?.history?.length) return 0;
+    const byDate = new Map(nutritionHistory.history.map((d) => [d.date, d]));
+    return computeLoggingStreak((dateKey) => !!byDate.get(dateKey)?.has_logged);
+  }, [nutritionHistory]);
+
 
   // Chart data/stats for the currently selected metric + timeframe
   const chartValues = useMemo(
@@ -236,14 +282,14 @@ export function NutritionProgressSection({
         <Card elevated style={[styles.metricCard, styles.metricCardPrimary]}>
           <Flame size={14} color={colors.primaryLight} />
           <Text style={styles.metricLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-            This Week Avg
+            This Week
           </Text>
           <Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {currentWeek?.avg_calories ? formatNumber(currentWeek.avg_calories) : '--'}
             <Text style={styles.metricUnit}> kcal</Text>
           </Text>
           <Text style={styles.metricTarget} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-            Target: {formatNumber(targetCalories)} kcal
+            Goal {formatNumber(targetCalories)} kcal
           </Text>
           <View style={styles.metricAdherenceRow}>
             <View
@@ -271,14 +317,14 @@ export function NutritionProgressSection({
         <Card style={styles.metricCard}>
           <Dumbbell size={14} color={colors.cyan} />
           <Text style={styles.metricLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-            Protein Avg
+            Protein
           </Text>
           <Text style={[styles.metricValue, { color: colors.cyan }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {currentWeek?.avg_protein ? Math.round(currentWeek.avg_protein) : '--'}
             <Text style={styles.metricUnit}> g</Text>
           </Text>
           <Text style={styles.metricTarget} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-            Target: {formatNumber(targetProtein)} g
+            Goal {formatNumber(targetProtein)} g
           </Text>
           <View style={styles.metricAdherenceRow}>
             <View
@@ -294,7 +340,7 @@ export function NutritionProgressSection({
               ]}
             />
             <Text style={styles.metricAdherenceText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-              {currentWeek?.logged_count ? `${currentWeek.protein_adherence_pct}% target met` : 'No logs yet'}
+              {currentWeek?.logged_count ? `${currentWeek.protein_adherence_pct}% of goal` : 'No logs yet'}
             </Text>
           </View>
         </Card>
@@ -302,14 +348,14 @@ export function NutritionProgressSection({
         <Card style={styles.metricCard}>
           <Zap size={14} color={colors.amber} />
           <Text style={styles.metricLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-            Logging Streak
+            Streak
           </Text>
           <Text style={[styles.metricValue, { color: colors.amber }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
             {loggingStreak}
             <Text style={styles.metricUnit}> {loggingStreak === 1 ? 'day' : 'days'}</Text>
           </Text>
           <Text style={styles.metricTarget} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-            {loggingStreak > 0 ? 'Keep it going' : 'Log today to start'}
+            {loggingStreak > 0 ? 'Keep it going' : 'Log today'}
           </Text>
           <View style={styles.metricAdherenceRow}>
             <View
@@ -319,7 +365,7 @@ export function NutritionProgressSection({
               ]}
             />
             <Text style={styles.metricAdherenceText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-              {loggingStreak >= 7 ? 'On fire 🔥' : loggingStreak > 0 ? 'Consecutive days' : 'No active streak'}
+              {loggingStreak >= 7 ? 'On fire' : loggingStreak > 0 ? 'In a row' : 'No streak'}
             </Text>
           </View>
         </Card>
@@ -424,15 +470,28 @@ export function NutritionProgressSection({
                 </View>
               </View>
 
-              <LineChart
-                data={chartLineData}
-                color={colors[metricConfig.colorKey]}
-                targetValue={metricTarget}
-                targetLabel="Target"
-                unit={metricConfig.unit}
-                formatValue={metricConfig.formatLabel}
-                accessibilityLabel={`Daily ${metricConfig.label} chart`}
-              />
+              {useBars ? (
+                <BarChart
+                  data={dailyBars}
+                  color={colors[metricConfig.colorKey]}
+                  targetValue={metricTarget}
+                  targetLabel="Target"
+                  unit={metric === 'calories' ? '' : 'g'}
+                  height={170}
+                  formatValue={metricConfig.formatLabel}
+                  accessibilityLabel={`Daily ${metricConfig.label} chart`}
+                />
+              ) : (
+                <LineChart
+                  data={chartLineData}
+                  color={colors[metricConfig.colorKey]}
+                  targetValue={metricTarget}
+                  targetLabel="Target"
+                  unit={metricConfig.unit}
+                  formatValue={metricConfig.formatLabel}
+                  accessibilityLabel={`Daily ${metricConfig.label} chart`}
+                />
+              )}
             </>
           ) : (
             <View style={styles.emptyChartBox}>
@@ -465,6 +524,41 @@ export function NutritionProgressSection({
           </View>
         </Card>
       </Animated.View>
+
+      {/* ── Weekly Average vs Target ── */}
+      {weeklyBars.length >= 2 && (
+        <Animated.View entering={enter(2)}>
+          <Card elevated style={styles.chartCard}>
+            <View style={styles.chartHeader}>
+              <View style={styles.chartHeaderLeft}>
+                <View style={[styles.chartIconBadge, { backgroundColor: `${colors[metricConfig.colorKey]}22` }]}>
+                  <Calendar size={13} color={colors[metricConfig.colorKey]} />
+                </View>
+                <View style={styles.chartHeaderText}>
+                  <Text style={styles.chartTitle}>Weekly Average</Text>
+                  <Text style={styles.chartSub} numberOfLines={1}>
+                    Last {weeklyBars.length} weeks
+                  </Text>
+                </View>
+              </View>
+              <Badge
+                label={`${weeksOnTarget.hit}/${weeksOnTarget.total} on target`}
+                tone={weeksOnTarget.total > 0 && weeksOnTarget.hit / weeksOnTarget.total >= 0.6 ? 'emerald' : 'amber'}
+              />
+            </View>
+            <BarChart
+              data={weeklyBars}
+              color={colors[metricConfig.colorKey]}
+              targetValue={metricTarget}
+              targetLabel="Target"
+              unit={metric === 'calories' ? '' : 'g'}
+              height={150}
+              formatValue={metricConfig.formatLabel}
+              accessibilityLabel={`Weekly average ${metricConfig.label} chart`}
+            />
+          </Card>
+        </Animated.View>
+      )}
 
       {/* ── Week-by-Week Breakdown ── */}
       {weeks.length > 0 && (

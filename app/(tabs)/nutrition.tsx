@@ -24,6 +24,7 @@ import {
   Pencil,
   Check,
   X,
+  Settings2,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { api, extractErrorMessage } from '../../src/api/client';
@@ -486,6 +487,14 @@ export default function NutritionScreen() {
                   : `Aim for ${formatNumber(caloriesTarget)} kcal and ${targets?.protein_g || 160}g protein daily.`}
               </Text>
             </View>
+            <PressableScale
+              haptic="selection"
+              onPress={() => router.push('/nutrition-targets')}
+              style={styles.editTargetsBtn}
+              accessibilityLabel="Edit nutrition targets"
+            >
+              <Settings2 size={16} color={colors.primaryLight} />
+            </PressableScale>
           </View>
         </Animated.View>
 
@@ -1344,6 +1353,15 @@ const useStyles = makeStyles(({ colors }) => ({
     fontWeight: '500',
     color: colors.textMuted,
     lineHeight: 15,
+  },
+  editTargetsBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
   },
   macroSublabel: {
     fontSize: 9,

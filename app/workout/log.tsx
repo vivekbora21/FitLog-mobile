@@ -47,6 +47,8 @@ import {
   type WorkoutEditDraft,
 } from '../../src/features/workout/draft';
 import { CardioLogModal } from '../../src/features/workout/CardioLogModal';
+import { cardioProfileFromUser, estimateDraftSetCalories } from '../../src/features/workout/cardioCalories';
+import { useAuth } from '../../src/providers/auth';
 import { ExerciseCard } from '../../src/features/workout/ExerciseCard';
 import { ExercisePicker } from '../../src/features/workout/ExercisePicker';
 import { RoutinePicker } from '../../src/features/workout/RoutinePicker';
@@ -67,6 +69,8 @@ export default function LogWorkoutScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
+  const cardioProfile = cardioProfileFromUser(user?.profile);
   const params = useLocalSearchParams<{
     plan?: string;
     date?: string;
@@ -442,7 +446,12 @@ export default function LogWorkoutScreen() {
               incline_percent: parseNumberInput(s.incline || '') ?? null,
               speed_kmh: parseNumberInput(s.speedKmh || '') ?? null,
               resistance_level: s.resistance ? Math.round(parseNumberInput(s.resistance || '') ?? 0) : null,
-              calories: s.calories ? Math.round(parseNumberInput(s.calories || '') ?? 0) : null,
+              // A typed value wins; otherwise cardio gets the same estimate shown on the card.
+              calories: s.calories
+                ? Math.round(parseNumberInput(s.calories || '') ?? 0)
+                : isCardio
+                  ? (estimateDraftSetCalories(ex, s, cardioProfile)?.kcal ?? null)
+                  : null,
               heart_rate: s.heartRate ? Math.round(parseNumberInput(s.heartRate || '') ?? 0) : null,
               intensity: s.intensity || (isCardio ? 'Zone 2' : ''),
               completed: s.done,
