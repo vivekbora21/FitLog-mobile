@@ -65,6 +65,7 @@ import { invalidateWorkoutData } from '../../src/lib/queries';
 import { ResumeWorkoutBanner } from '../../src/features/workout/ResumeWorkoutBanner';
 import { draftHasContent, loadWorkoutDraft } from '../../src/features/workout/draft';
 import { getRoutineExerciseDisplayName } from '../../src/lib/workout';
+import { useCalendar } from '../../src/providers/calendar';
 
 const COLLAPSED_EXERCISES = 3;
 const enter = (i: number) => FadeInDown.delay(60 + i * 60).duration(420);
@@ -87,7 +88,7 @@ export default function WorkoutsScreen() {
   );
 
   const todayKey = useMemo(() => toDateKey(new Date()), []);
-  const [selectedDate, setSelectedDate] = useState<string>(todayKey);
+  const { selectedDate, setSelectedDate } = useCalendar();
   const [activeDayModal, setActiveDayModal] = useState<string | null>(null);
 
   const {
@@ -253,10 +254,28 @@ export default function WorkoutsScreen() {
     };
   }, [sessions, mountedAt]);
 
-  const today = todayWorkout?.today;
+  const isTodayDate = selectedDate === todayKey;
+  const today = isTodayDate ? todayWorkout?.today : selectedDateWorkout?.today ?? todayWorkout?.today;
   const routine = today?.routine_details;
   const exercises = routine?.exercises || [];
-  const isDone = today?.status === 'COMPLETED';
+
+  const hasLoggedWorkoutOnSelectedDate = Boolean(
+    selectedDayInfo?.has_workout ||
+    selectedDayInfo?.status === 'COMPLETED' ||
+    (selectedDayInfo as any)?.session_id ||
+    selectedDateSessions.length > 0
+  );
+
+  const isDone = (today?.status === 'COMPLETED' && isTodayDate) || hasLoggedWorkoutOnSelectedDate;
+
+  const completedSession = selectedDateSessions[0] || (today?.status === 'COMPLETED' ? (today as any)?.completed_session : null) || null;
+  const completedSessionId = completedSession?.id || (selectedDayInfo as any)?.session_id || (today?.status === 'COMPLETED' ? (today as any)?.completed_session_id : null);
+  const completedSessionTitle =
+    completedSession?.title ||
+    selectedDayInfo?.workout_title ||
+    (today?.status === 'COMPLETED' ? (routine?.name || today?.label) : null) ||
+    'Workout Session';
+
   const visibleExercises = showAllExercises ? exercises : exercises.slice(0, COLLAPSED_EXERCISES);
   const hiddenCount = exercises.length - COLLAPSED_EXERCISES;
 
@@ -433,18 +452,29 @@ export default function WorkoutsScreen() {
               <View style={styles.todayHeader}>
                 <View style={styles.routineCol}>
                   <Badge
-                    label={today?.status || (exercises.length ? 'Scheduled' : 'Rest')}
+                    label={isDone ? 'Completed' : (today?.status || (exercises.length ? 'Scheduled' : 'Rest'))}
                     tone={isDone ? 'emerald' : exercises.length ? 'cyan' : 'slate'}
                   />
                   <Text style={styles.routineTitle} numberOfLines={2}>
-                    {routine?.name || today?.label || 'Rest Day / Recovery'}
+                    {isDone ? completedSessionTitle : (routine?.name || today?.label || 'Rest Day / Recovery')}
                   </Text>
-                  {exercises.length > 0 && (
+                  {isDone ? (
+                    <Text style={styles.routineMeta}>
+                      {[
+                        formatDuration(completedSession?.duration_seconds || (selectedDayInfo?.duration_min ? selectedDayInfo.duration_min * 60 : null)),
+                        completedSession?.total_volume_kg ? formatVolume(completedSession.total_volume_kg) : (selectedDayInfo?.volume_kg ? formatVolume(selectedDayInfo.volume_kg) : null),
+                        completedSession?.total_calories ? `${completedSession.total_calories} kcal` : null,
+                        (completedSession?.exercises?.length || selectedDayInfo?.exercises_count || exercises.length) ? `${completedSession?.exercises?.length || selectedDayInfo?.exercises_count || exercises.length} exercises logged` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || 'Completed — great work!'}
+                    </Text>
+                  ) : exercises.length > 0 ? (
                     <Text style={styles.routineMeta}>
                       {exercises.length} exercises ·{' '}
                       {exercises.reduce((n, ex) => n + (ex.target_sets || 0), 0)} total sets
                     </Text>
-                  )}
+                  ) : null}
                 </View>
                 <View style={[styles.iconCircle, isDone && styles.iconCircleDone]}>
                   {isDone ? (
@@ -549,7 +579,35 @@ export default function WorkoutsScreen() {
                 </Text>
               )}
 
-              {exercises.length > 0 && !isDone ? (
+              {isDone ? (
+                <>
+                  {completedSessionId ? (
+                    <Button
+                      title="View session details"
+                      icon={<ChevronRight size={18} color="#FFFFFF" />}
+                      iconPosition="right"
+                      onPress={() => router.push(`/workout/${completedSessionId}`)}
+                      style={styles.todayAction}
+                    />
+                  ) : (
+                    <Button
+                      title="View in plan"
+                      icon={<ChevronRight size={18} color="#FFFFFF" />}
+                      iconPosition="right"
+                      onPress={() => router.push('/plan')}
+                      style={styles.todayAction}
+                    />
+                  )}
+                  <Button
+                    title="Log another workout"
+                    variant="secondary"
+                    icon={<Plus size={16} color={colors.textPrimary} />}
+                    iconPosition="left"
+                    onPress={() => router.push({ pathname: '/workout/log', params: isTodayDate ? undefined : { date: selectedDate } })}
+                    style={{ marginTop: spacing.sm }}
+                  />
+                </>
+              ) : exercises.length > 0 ? (
                 <>
                   <Button
                     title={hasActiveDraft ? 'Resume workout' : 'Start workout'}
@@ -586,11 +644,11 @@ export default function WorkoutsScreen() {
                 </>
               ) : (
                 <Button
-                  title={isDone ? 'Log another workout' : 'Log a workout'}
+                  title="Log a workout"
                   variant="secondary"
                   icon={<Plus size={18} color={colors.textPrimary} />}
                   iconPosition="left"
-                  onPress={() => router.push('/workout/log')}
+                  onPress={() => router.push({ pathname: '/workout/log', params: isTodayDate ? undefined : { date: selectedDate } })}
                   style={styles.todayAction}
                 />
               )}

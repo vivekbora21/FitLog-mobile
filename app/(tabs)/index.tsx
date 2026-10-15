@@ -23,6 +23,10 @@ import {
   Check,
   Plus,
   ClipboardCheck,
+  Clock,
+  Play,
+  CheckCircle2,
+  Moon,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/providers/auth';
 import { api, extractErrorMessage } from '../../src/api/client';
@@ -39,6 +43,7 @@ import {
   WeekCalendar,
   DayActionModal,
   WaterCups,
+  Button,
 } from '../../src/components/ui';
 import { useTabBarClearance } from '../../src/components/navigation/TabBar';
 import { radius, spacing, makeStyles, useTheme } from '../../src/theme';
@@ -48,6 +53,7 @@ import { haptics } from '../../src/lib/haptics';
 import { ResumeWorkoutBanner } from '../../src/features/workout/ResumeWorkoutBanner';
 import { invalidateTrackingData } from '../../src/lib/queries';
 import { getRoutineExerciseDisplayName } from '../../src/lib/workout';
+import { useCalendar } from '../../src/providers/calendar';
 
 const enter = (i: number) => FadeInDown.delay(80 + i * 70).duration(450);
 
@@ -58,6 +64,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const bottomClearance = useTabBarClearance();
+  const { selectedDate, setSelectedDate } = useCalendar();
 
   const {
     data: stats,
@@ -127,11 +134,59 @@ export default function DashboardScreen() {
   const prs = stats?.recent_prs || [];
   const heatmap = stats?.activity_heatmap || {};
 
+  const todayCalendarDay = stats?.calendar_days?.[todayKey];
   const today = todayWorkout?.today;
   const routineDetails = today?.routine_details;
-  const routineName = routineDetails?.name || today?.label || 'Active Rest & Recovery';
-  const exerciseCount = routineDetails?.exercises?.length || 0;
-  const isWorkoutDone = today?.status === 'COMPLETED';
+  const hasWorkoutToday = Boolean(
+    todayCalendarDay?.has_workout ||
+    todayCalendarDay?.status === 'COMPLETED' ||
+    (todayCalendarDay as any)?.session_id ||
+    today?.status === 'COMPLETED'
+  );
+  const isWorkoutDone = hasWorkoutToday || today?.status === 'COMPLETED';
+  const routineName =
+    (isWorkoutDone ? todayCalendarDay?.workout_title : null) ||
+    routineDetails?.name ||
+    today?.label ||
+    'Active Rest & Recovery';
+  const exerciseCount = isWorkoutDone
+    ? (todayCalendarDay?.exercises_count || routineDetails?.exercises?.length || 0)
+    : (routineDetails?.exercises?.length || 0);
+
+  const completedSessionId =
+    (today as any)?.completed_session_id ||
+    (today as any)?.completed_session?.id ||
+    (todayCalendarDay as any)?.session_id ||
+    null;
+
+  const completedSessionTitle =
+    todayCalendarDay?.workout_title ||
+    ((today as any)?.completed_session_title) ||
+    ((today as any)?.completed_session?.title) ||
+    routineName;
+
+  const completedVolumeKg =
+    (today as any)?.completed_volume_kg ??
+    todayCalendarDay?.volume_kg ??
+    0;
+
+  const completedDurationMin =
+    (today as any)?.completed_duration_seconds != null
+      ? Math.round((today as any).completed_duration_seconds / 60)
+      : (todayCalendarDay?.duration_min ?? 0);
+
+  const completedExerciseCount =
+    (today as any)?.completed_exercise_count ??
+    todayCalendarDay?.exercises_count ??
+    exerciseCount;
+
+  const todayPrs = useMemo(() => {
+    if (!prs || !Array.isArray(prs)) return [];
+    return prs.filter((pr: any) => {
+      if (!pr.achieved_at) return false;
+      return toDateKey(new Date(pr.achieved_at)) === todayKey;
+    });
+  }, [prs, todayKey]);
 
   const journeyMode = stats?.journey?.mode || (user?.profile?.fitness_goal === 'FAT_LOSS' ? 'CUT' : (user?.profile?.fitness_goal === 'HYPERTROPHY' || user?.profile?.fitness_goal === 'STRENGTH') ? 'BULK' : 'CUT');
   const isBulk = journeyMode === 'BULK';
@@ -214,8 +269,8 @@ export default function DashboardScreen() {
         {/* Week strip */}
         <Animated.View entering={enter(0)}>
           <WeekCalendar
-            selectedDate={activeDayModal || todayKey}
-            onSelectDate={(key) => setActiveDayModal(key)}
+            selectedDate={selectedDate}
+            onSelectDate={(key) => setSelectedDate(key)}
             onOpenDayModal={(key) => setActiveDayModal(key)}
             calendarDays={stats?.calendar_days}
             heatmap={heatmap}
@@ -346,71 +401,218 @@ export default function DashboardScreen() {
 
         {/* Today's workout */}
         <Animated.View entering={enter(2)}>
-          <Text style={styles.sectionTitle}>Today&apos;s workout</Text>
-          <Card
-            elevated
-            highlighted={!isWorkoutDone && exerciseCount > 0}
-            onPress={() => router.navigate('/(tabs)/workouts')}
-            accessibilityHint="Opens today's workout"
-            style={styles.todayCard}
-          >
-            <View style={styles.todayRow}>
-              <View style={[styles.workoutIconBox, isWorkoutDone && styles.workoutIconDone]}>
-                {isWorkoutDone ? (
-                  <Check size={24} color={colors.textInverse} strokeWidth={3} />
-                ) : (
-                  <Dumbbell size={24} color={colors.primaryLight} />
-                )}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitleInline}>Today&apos;s workout</Text>
+            {isWorkoutDone ? (
+              <View style={styles.completedBadge}>
+                <Check size={11} color={colors.success} strokeWidth={3} />
+                <Text style={styles.completedBadgeText}>Completed</Text>
               </View>
-              <View style={styles.workoutInfo}>
-                <Text style={styles.workoutName} numberOfLines={1}>
-                  {routineName}
-                </Text>
-                <Text style={styles.workoutDetails}>
-                  {isWorkoutDone
-                    ? 'Completed — great work!'
-                    : exerciseCount > 0
+            ) : exerciseCount > 0 ? (
+              <Text style={styles.sectionMeta}>{exerciseCount} exercises</Text>
+            ) : null}
+          </View>
+
+          {isWorkoutDone ? (
+            /* COMPLETED WORKOUT CARD */
+            <Card
+              elevated
+              style={styles.todayCard}
+            >
+              <PressableScale
+                onPress={() => router.push(completedSessionId ? `/workout/${completedSessionId}` : '/(tabs)/workouts')}
+                accessibilityLabel="View completed workout details"
+                style={styles.todayRow}
+              >
+                <View style={[styles.workoutIconBox, styles.workoutIconDone]}>
+                  <Check size={24} color={colors.textInverse} strokeWidth={3} />
+                </View>
+                <View style={styles.workoutInfo}>
+                  <Text style={styles.workoutName} numberOfLines={1}>
+                    {completedSessionTitle || routineName}
+                  </Text>
+                  <Text style={styles.workoutDetails}>
+                    Completed today — great work! 🎉
+                  </Text>
+                </View>
+                <View style={styles.chevronCircle}>
+                  <ChevronRight size={18} color={colors.primaryLight} />
+                </View>
+              </PressableScale>
+
+              {/* Stats highlights: Volume, Duration, Exercises */}
+              <View style={styles.completedStatsRow}>
+                <View style={styles.completedStatTile}>
+                  <Dumbbell size={14} color={colors.primaryLight} />
+                  <Text style={styles.completedStatValue}>
+                    {completedVolumeKg > 0 ? `${formatNumber(Math.round(completedVolumeKg))} kg` : 'Logged'}
+                  </Text>
+                  <Text style={styles.completedStatLabel}>Volume</Text>
+                </View>
+
+                <View style={styles.completedStatTile}>
+                  <Clock size={14} color={colors.cyan} />
+                  <Text style={styles.completedStatValue}>
+                    {completedDurationMin > 0 ? `${completedDurationMin} min` : 'Done'}
+                  </Text>
+                  <Text style={styles.completedStatLabel}>Duration</Text>
+                </View>
+
+                <View style={styles.completedStatTile}>
+                  <CheckCircle2 size={14} color={colors.success} />
+                  <Text style={styles.completedStatValue}>
+                    {completedExerciseCount > 0 ? completedExerciseCount : 'Done'}
+                  </Text>
+                  <Text style={styles.completedStatLabel}>Exercises</Text>
+                </View>
+              </View>
+
+              {todayPrs.length > 0 && (
+                <View style={styles.prCelebrationBanner}>
+                  <Trophy size={14} color={colors.amber} />
+                  <Text style={styles.prCelebrationText}>
+                    {todayPrs.length === 1
+                      ? `New PR: ${todayPrs[0].exercise} (${todayPrs[0].max_weight_kg} kg)!`
+                      : `${todayPrs.length} Personal Records broken today! 🔥`}
+                  </Text>
+                </View>
+              )}
+
+              {/* Action buttons */}
+              <View style={styles.todayActionContainer}>
+                <Button
+                  title="View session details"
+                  variant="primary"
+                  icon={<ChevronRight size={16} color="#FFFFFF" />}
+                  iconPosition="right"
+                  onPress={() => router.push(completedSessionId ? `/workout/${completedSessionId}` : '/(tabs)/workouts')}
+                />
+                <Button
+                  title="Log another workout"
+                  variant="secondary"
+                  icon={<Plus size={16} color={colors.textPrimary} />}
+                  iconPosition="left"
+                  onPress={() => router.push('/workout/log')}
+                  style={{ marginTop: spacing.sm }}
+                />
+              </View>
+            </Card>
+          ) : (
+            /* UNCOMPLETED WORKOUT CARD */
+            <Card
+              elevated
+              highlighted={exerciseCount > 0}
+              style={styles.todayCard}
+            >
+              <PressableScale
+                onPress={() => router.navigate('/(tabs)/workouts')}
+                accessibilityLabel="View today's workout plan"
+                style={styles.todayRow}
+              >
+                <View style={styles.workoutIconBox}>
+                  {exerciseCount > 0 ? (
+                    <Dumbbell size={24} color={colors.primaryLight} />
+                  ) : (
+                    <Moon size={24} color={colors.violet} />
+                  )}
+                </View>
+                <View style={styles.workoutInfo}>
+                  <Text style={styles.workoutName} numberOfLines={1}>
+                    {routineName}
+                  </Text>
+                  <Text style={styles.workoutDetails}>
+                    {exerciseCount > 0
                       ? `${exerciseCount} exercises · ${today?.label || 'Scheduled'}`
                       : 'Rest day — recover well'}
-                </Text>
-              </View>
-              <View style={styles.chevronCircle}>
-                <ChevronRight size={18} color={colors.primaryLight} />
-              </View>
-            </View>
+                  </Text>
+                </View>
+                <View style={styles.chevronCircle}>
+                  <ChevronRight size={18} color={colors.primaryLight} />
+                </View>
+              </PressableScale>
 
-            {routineDetails?.exercises && exerciseCount > 0 && (
-              <View style={styles.chipRow}>
-                {routineDetails.exercises.slice(0, 3).map((ex, idx) => {
-                  const displayName = getRoutineExerciseDisplayName(ex);
-                  const isSwapped = !!ex.swap;
-                  return (
-                    <View
-                      key={ex.id || idx}
-                      style={[styles.exerciseChip, isWorkoutDone && styles.exerciseChipDone]}
-                    >
-                      <Text
-                        style={[styles.exerciseChipText, isWorkoutDone && styles.exerciseChipTextDone]}
-                        numberOfLines={1}
+              {routineDetails?.exercises && exerciseCount > 0 && (
+                <View style={styles.chipRow}>
+                  {routineDetails.exercises.slice(0, 3).map((ex, idx) => {
+                    const displayName = getRoutineExerciseDisplayName(ex);
+                    const isSwapped = !!ex.swap;
+                    return (
+                      <View
+                        key={ex.id || idx}
+                        style={styles.exerciseChip}
                       >
-                        {displayName}
-                      </Text>
-                      {isSwapped && (
-                        <View style={styles.swappedBadge}>
-                          <Text style={styles.swappedBadgeText}>Swapped</Text>
-                        </View>
-                      )}
+                        <Text
+                          style={styles.exerciseChipText}
+                          numberOfLines={1}
+                        >
+                          {displayName}
+                        </Text>
+                        {isSwapped && (
+                          <View style={styles.swappedBadge}>
+                            <Text style={styles.swappedBadgeText}>Swapped</Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                  {exerciseCount > 3 && (
+                    <View style={[styles.exerciseChip, styles.exerciseChipMore]}>
+                      <Text style={styles.exerciseChipMoreText}>+{exerciseCount - 3}</Text>
                     </View>
-                  );
-                })}
-                {exerciseCount > 3 && (
-                  <View style={[styles.exerciseChip, styles.exerciseChipMore]}>
-                    <Text style={styles.exerciseChipMoreText}>+{exerciseCount - 3}</Text>
-                  </View>
+                  )}
+                </View>
+              )}
+
+              {/* Action Buttons: Clear option to log */}
+              <View style={styles.todayActionContainer}>
+                {exerciseCount > 0 ? (
+                  <>
+                    <Button
+                      title="Start workout"
+                      variant="primary"
+                      icon={<Play size={15} color="#FFFFFF" fill="#FFFFFF" />}
+                      iconPosition="left"
+                      onPress={() =>
+                        router.push({
+                          pathname: '/workout/log',
+                          params: { plan: '1' },
+                        })
+                      }
+                    />
+                    <View style={styles.todaySecondaryActionsRow}>
+                      <PressableScale
+                        haptic="selection"
+                        onPress={() => router.push('/workout/log')}
+                        style={styles.todayQuickBtn}
+                        accessibilityLabel="Log a different or custom workout"
+                      >
+                        <Plus size={14} color={colors.primaryLight} strokeWidth={2.4} />
+                        <Text style={styles.todayQuickBtnText}>Different workout</Text>
+                      </PressableScale>
+
+                      <PressableScale
+                        haptic="selection"
+                        onPress={() => router.navigate('/(tabs)/workouts')}
+                        style={styles.todayQuickBtn}
+                        accessibilityLabel="View full workout plan"
+                      >
+                        <ChevronRight size={14} color={colors.textSecondary} strokeWidth={2} />
+                        <Text style={styles.todayQuickBtnText}>View in plan</Text>
+                      </PressableScale>
+                    </View>
+                  </>
+                ) : (
+                  <Button
+                    title="Log custom workout"
+                    variant="secondary"
+                    icon={<Plus size={16} color={colors.textPrimary} />}
+                    iconPosition="left"
+                    onPress={() => router.push('/workout/log')}
+                  />
                 )}
               </View>
-            )}
-          </Card>
+            </Card>
+          )}
         </Animated.View>
 
         {/* Water + steps */}
@@ -826,6 +1028,96 @@ const useStyles = makeStyles(({ colors }) => ({
   todayCard: {
     padding: spacing.lg,
     marginBottom: spacing.md,
+  },
+  completedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+    backgroundColor: `${colors.success}18`,
+    borderWidth: 1,
+    borderColor: `${colors.success}40`,
+  },
+  completedBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  completedStatsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  completedStatTile: {
+    flex: 1,
+    backgroundColor: colors.surfaceHover,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completedStatValue: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  completedStatLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  prCelebrationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+    backgroundColor: `${colors.amber}18`,
+    borderRadius: radius.md,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: `${colors.amber}40`,
+  },
+  prCelebrationText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.amber,
+    flex: 1,
+  },
+  todayActionContainer: {
+    marginTop: spacing.md,
+  },
+  todaySecondaryActionsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  todayQuickBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceHover,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  todayQuickBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   todayRow: {
     flexDirection: 'row',

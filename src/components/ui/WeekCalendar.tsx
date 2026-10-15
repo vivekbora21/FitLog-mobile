@@ -6,9 +6,10 @@ import Animated, { SlideInLeft, SlideInRight, runOnJS } from 'react-native-reani
 import { PressableScale } from './PressableScale';
 import { Card } from './Card';
 import { radius, spacing, makeStyles, useTheme } from '../../theme';
-import { parseDateKey, shiftDateKey, toDateKey } from '../../lib/format';
+import { parseDateKey, toDateKey } from '../../lib/format';
 import { haptics } from '../../lib/haptics';
 import type { CalendarDayInfo, DayStatus } from '../../api/client';
+import { useCalendar } from '../../providers/calendar';
 
 interface WeekCalendarProps {
   selectedDate?: string;
@@ -20,6 +21,7 @@ interface WeekCalendarProps {
   weeklyTarget?: number;
   showAdherence?: boolean;
   title?: string;
+  showMonth?: boolean;
 }
 
 export function WeekCalendar({
@@ -32,15 +34,31 @@ export function WeekCalendar({
   weeklyTarget,
   showAdherence = true,
   title = 'This week',
+  showMonth = false,
 }: WeekCalendarProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const { selectedDate: sharedDate, setSelectedDate: setSharedDate } = useCalendar();
   const todayKey = toDateKey(new Date());
 
-  // Offset in weeks from current week (0 = current week, -1 = last week, etc.)
-  const [weekOffset, setWeekOffset] = useState(0);
   // Direction of the most recent week change, used to slide the new week in from the matching side.
   const [swipeDirection, setSwipeDirection] = useState<1 | -1>(1);
+
+  const activeDate = selectedDate || sharedDate || todayKey;
+
+  const weekOffset = useMemo(() => {
+    const today = parseDateKey(todayKey);
+    const active = parseDateKey(activeDate);
+    const mondayOffset = (date: Date) => {
+      const day = date.getDay();
+      return day === 0 ? -6 : 1 - day;
+    };
+    const todayMonday = new Date(today);
+    todayMonday.setDate(today.getDate() + mondayOffset(today));
+    const activeMonday = new Date(active);
+    activeMonday.setDate(active.getDate() + mondayOffset(active));
+    return Math.round((activeMonday.getTime() - todayMonday.getTime()) / (7 * 86_400_000));
+  }, [activeDate, todayKey]);
 
   // Compute 7 days for the active week window
   const weekDays = useMemo(() => {
@@ -60,7 +78,13 @@ export function WeekCalendar({
     return days;
   }, [weekOffset]);
 
-  const activeDate = selectedDate || todayKey;
+  // Keep every calendar instance on the same week. Moving one week shifts the
+  // shared selected date by seven days, preserving the selected weekday.
+  const shiftSharedWeek = (amount: number) => {
+    const next = parseDateKey(activeDate);
+    next.setDate(next.getDate() + amount * 7);
+    setSharedDate(toDateKey(next));
+  };
 
   const weekRangeLabel = useMemo(() => {
     if (weekOffset === 0) return title;
@@ -74,16 +98,39 @@ export function WeekCalendar({
     return `${m1} ${first.getDate()} – ${m2} ${last.getDate()}`;
   }, [weekOffset, weekDays, title]);
 
+  const monthLabel = useMemo(() => {
+    const first = weekDays[0];
+    const last = weekDays[6];
+    const firstLabel = first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const lastLabel = last.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    return firstLabel === lastLabel ? firstLabel : `${firstLabel} – ${lastLabel}`;
+  }, [weekDays]);
+
+  // The summary must follow the week currently on screen. The old implementation
+  // rendered the caller's `workoutsThisWeek`, which is intentionally anchored to
+  // the real current week and therefore stayed at 0/5 when browsing history.
+  const visibleWeekWorkoutCount = useMemo(() => {
+    if (!Object.keys(calendarDays).length && !Object.keys(heatmap).length) {
+      return workoutsThisWeek;
+    }
+    return weekDays.reduce((count, day) => {
+      const key = toDateKey(day);
+      const info = calendarDays[key];
+      const completed = info?.status === 'COMPLETED' || Boolean(info?.has_workout) || (heatmap[key] || 0) > 0;
+      return count + (completed ? 1 : 0);
+    }, 0);
+  }, [calendarDays, heatmap, weekDays, workoutsThisWeek]);
+
   const handlePrevWeek = () => {
     haptics.selection();
     setSwipeDirection(-1);
-    setWeekOffset((w) => w - 1);
+    shiftSharedWeek(-1);
   };
 
   const handleNextWeek = () => {
     haptics.selection();
     setSwipeDirection(1);
-    setWeekOffset((w) => w + 1);
+    shiftSharedWeek(1);
   };
 
   const swipeGesture = useMemo(
@@ -103,6 +150,7 @@ export function WeekCalendar({
 
   const handleDayPress = (key: string) => {
     haptics.selection();
+    setSharedDate(key);
     onSelectDate(key);
     if (onOpenDayModal) {
       onOpenDayModal(key);
@@ -113,15 +161,18 @@ export function WeekCalendar({
     <Card style={styles.card}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.weekTitle}>{weekRangeLabel}</Text>
-          {showAdherence && workoutsThisWeek !== undefined && weeklyTarget !== undefined && (
-            <View style={styles.countBadge}>
-              <Text style={styles.countText}>
-                <Text style={styles.countStrong}>{workoutsThisWeek}</Text>/{weeklyTarget} workouts
-              </Text>
-            </View>
-          )}
+        <View style={styles.headerLeftColumn}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.weekTitle}>{weekRangeLabel}</Text>
+            {showAdherence && visibleWeekWorkoutCount !== undefined && weeklyTarget !== undefined && (
+              <View style={styles.countBadge}>
+                <Text style={styles.countText}>
+                  <Text style={styles.countStrong}>{visibleWeekWorkoutCount}</Text>/{weeklyTarget} workouts
+                </Text>
+              </View>
+            )}
+          </View>
+          {showMonth ? <Text style={styles.monthLabel}>{monthLabel}</Text> : null}
         </View>
 
         <View style={styles.navRow}>
@@ -136,7 +187,9 @@ export function WeekCalendar({
           {weekOffset !== 0 && (
             <PressableScale
               haptic="selection"
-              onPress={() => setWeekOffset(0)}
+            onPress={() => {
+              setSharedDate(todayKey);
+            }}
               style={styles.todayJumpBtn}
               accessibilityLabel="Jump to this week"
             >
@@ -281,6 +334,10 @@ const useStyles = makeStyles(({ colors }) => ({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headerLeftColumn: {
+    flex: 1,
+    gap: 2,
+  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -290,6 +347,11 @@ const useStyles = makeStyles(({ colors }) => ({
     fontSize: 15,
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  monthLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
   },
   countBadge: {
     paddingHorizontal: spacing.xs,

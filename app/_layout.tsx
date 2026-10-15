@@ -12,6 +12,7 @@ import { ToastProvider } from '../src/components/ui';
 import { OfflineBanner } from '../src/components/OfflineBanner';
 import { ThemeProvider, useTheme } from '../src/theme';
 import { wireOfflineQueueTriggers } from '../src/lib/offlineQueue';
+import { CalendarProvider } from '../src/providers/calendar';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,9 +82,11 @@ export default function RootLayout() {
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
-              <ToastProvider>
-                <RootNavigator />
-              </ToastProvider>
+              <CalendarProvider>
+                <ToastProvider>
+                  <RootNavigator />
+                </ToastProvider>
+              </CalendarProvider>
             </AuthProvider>
           </QueryClientProvider>
         </ThemeProvider>

@@ -624,6 +624,7 @@ export interface DashboardStats {
     program_day?: number | null;
     program_length?: number;
     program_completion_percent?: number;
+    plan_state?: PlanState;
   };
   daily_log?: {
     steps?: number;
@@ -643,6 +644,26 @@ export interface DashboardStats {
     nutrition: { date: string; label: string; calories: number; calories_target: number; protein: number; protein_target: number }[];
     calories_burned: { date: string; label: string; calories_burned: number }[];
   };
+}
+
+export interface PlanState {
+  start_date: string;
+  original_end_date: string;
+  effective_end_date: string;
+  duration_days: number;
+  effective_duration_days: number;
+  elapsed_calendar_days: number;
+  remaining_calendar_days: number;
+  calendar_progress_percent: number;
+  completed_workout_count: number;
+  missed_workout_count: number;
+  scheduled_workout_count: number;
+  completed_workout_dates: string[];
+  plan_status: 'ACTIVE' | 'COMPLETED';
+  extension_status: 'NONE' | 'DECLINED' | 'ACCEPTED';
+  extension_days: number;
+  extension_eligible: boolean;
+  near_completion: boolean;
 }
 
 export type WeeklyHealthStatus = 'good' | 'warn' | 'bad' | 'pending';

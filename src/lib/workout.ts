@@ -12,17 +12,68 @@ export interface NormalizedWorkoutDay {
   routine_details?: { id: string; name: string; description?: string; exercises?: RoutineExercise[] } | null;
   completed_session_id?: string | null;
   completed_session_title?: string | null;
+  completed_exercise_count?: number;
+  completed_duration_seconds?: number | null;
+  completed_volume_kg?: number | null;
+  workout_payload?: any;
 }
 
 export function normalizeWorkoutDay(day: NormalizedWorkoutDay): NormalizedWorkoutDay {
+  const exercises = day.routine_details?.exercises;
+  const normalizedExercises: RoutineExercise[] = Array.isArray(exercises)
+    ? [...exercises]
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map((ex) => {
+          const raw = ex as any;
+          const target_sets = Number(ex.target_sets ?? raw.targetSets ?? 0);
+          const target_reps = String(ex.target_reps ?? raw.targetReps ?? '8-12');
+          const rest_seconds = Number(ex.rest_seconds ?? raw.restSeconds ?? 90);
+          const exercise_name = ex.exercise_name || raw.name || raw.exercise_details?.name || 'Exercise';
+          const primary_muscle = ex.primary_muscle || raw.muscle || raw.exercise_details?.primary_muscle?.name || '';
+          const suggested_weight_kg = ex.suggested_weight_kg ?? raw.suggestedWeight ?? null;
+
+          return {
+            ...ex,
+            id: ex.id,
+            exercise: ex.exercise ?? raw.exerciseId ?? '',
+            exercise_name,
+            name: exercise_name,
+            primary_muscle,
+            muscle: primary_muscle,
+            target_sets,
+            targetSets: target_sets,
+            target_reps,
+            targetReps: target_reps,
+            rest_seconds,
+            restSeconds: rest_seconds,
+            suggested_weight_kg,
+            suggestedWeight: suggested_weight_kg,
+            target_rpe: ex.target_rpe ?? 8,
+            notes: ex.notes ?? '',
+            focus: ex.focus || '',
+            order: ex.order ?? 0,
+            swap: ex.swap ?? null,
+            progression: ex.progression ?? null,
+          } as RoutineExercise;
+        })
+    : [];
+
   return {
     ...day,
     calendar_date: day.calendar_date,
     label: day.label || `Day ${day.day_number}`,
     status: day.status || 'UPCOMING',
     is_optional: Boolean(day.is_optional),
+    completed_session_id: day.completed_session_id ?? null,
+    completed_session_title: day.completed_session_title ?? null,
+    completed_exercise_count: day.completed_exercise_count ?? 0,
+    completed_duration_seconds: day.completed_duration_seconds ?? null,
+    completed_volume_kg: day.completed_volume_kg ?? null,
     routine_details: day.routine_details
-      ? { ...day.routine_details, exercises: resolveRoutineExercises(day.routine_details.exercises) as unknown as RoutineExercise[] }
+      ? {
+          ...day.routine_details,
+          exercises: normalizedExercises,
+        }
       : null,
   };
 }
@@ -46,7 +97,7 @@ export interface ResolvedExercise {
  */
 export function getRoutineExerciseDisplayName(ex?: Partial<RoutineExercise> | null): string {
   if (!ex) return 'Exercise';
-  return ex.swap?.exercise_name || ex.exercise_name || 'Exercise';
+  return ex.swap?.exercise_name || ex.exercise_name || (ex as any).name || 'Exercise';
 }
 
 /**
@@ -54,7 +105,7 @@ export function getRoutineExerciseDisplayName(ex?: Partial<RoutineExercise> | nu
  */
 export function getRoutineExerciseMuscle(ex?: Partial<RoutineExercise> | null): string {
   if (!ex) return '';
-  return ex.swap?.primary_muscle || ex.primary_muscle || '';
+  return ex.swap?.primary_muscle || ex.primary_muscle || (ex as any).muscle || '';
 }
 
 /**

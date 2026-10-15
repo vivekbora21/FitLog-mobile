@@ -57,6 +57,10 @@ export interface ProgramDay {
   routine?: string | null;
   completed_session_id?: string | null;
   completed_session_title?: string | null;
+  completed_exercise_count?: number;
+  completed_duration_seconds?: number | null;
+  completed_volume_kg?: number | null;
+  completed_session?: WorkoutSession | null;
   workout_payload?: BlueprintWorkoutExercise[] | null;
   routine_details?: {
     id: string;
@@ -77,8 +81,29 @@ export interface WorkoutPlan {
     duration_days: number;
     start_weight_kg?: number | null;
     target_weight_kg?: number | null;
+    original_end_date?: string | null;
+    effective_end_date?: string | null;
     target_weekly_rate_kg?: number | null;
   } | null;
+  plan_state?: {
+    start_date: string;
+    original_end_date: string;
+    effective_end_date: string;
+    duration_days: number;
+    effective_duration_days: number;
+    elapsed_calendar_days: number;
+    remaining_calendar_days: number;
+    calendar_progress_percent: number;
+    completed_workout_count: number;
+    missed_workout_count: number;
+    scheduled_workout_count: number;
+    completed_workout_dates: string[];
+    plan_status: 'ACTIVE' | 'COMPLETED';
+    extension_status: 'NONE' | 'DECLINED' | 'ACCEPTED';
+    extension_days: number;
+    extension_eligible: boolean;
+    near_completion: boolean;
+  };
   days: ProgramDay[];
 }
 
@@ -564,7 +589,10 @@ class ApiClient {
       current_day: number;
       duration_days: number;
       start_date?: string | null;
+      original_end_date?: string | null;
+      effective_end_date?: string | null;
     } | null;
+    plan_state?: WorkoutPlan['plan_state'];
     today?: {
       id: string;
       day_number: number;
@@ -585,6 +613,14 @@ class ApiClient {
   async getWorkoutPlan(): Promise<WorkoutPlan> {
     const data = await this.get<WorkoutPlan>('/workouts/sessions/plan/');
     return { ...data, days: data.days.map((day) => normalizeWorkoutDay(day) as ProgramDay) };
+  }
+
+  async extendPlan(): Promise<{ success: boolean; plan_state: NonNullable<WorkoutPlan['plan_state']> }> {
+    return this.post('/workouts/sessions/extend-plan/', {});
+  }
+
+  async declinePlanExtension(): Promise<{ success: boolean; plan_state: NonNullable<WorkoutPlan['plan_state']> }> {
+    return this.post('/workouts/sessions/decline-plan-extension/', {});
   }
 
   async getWorkoutDay(dateKey: string): Promise<{ program: WorkoutPlan['program']; today: ProgramDay | null }> {
