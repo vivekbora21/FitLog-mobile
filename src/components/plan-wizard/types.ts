@@ -32,6 +32,7 @@ export interface PlanWizardState {
 }
 
 export const DEFAULT_SPREAD_BY_DAYS_PER_WEEK: Record<number, number[]> = {
+  2: [1, 4], // Mon/Thu
   3: [1, 3, 5], // Mon/Wed/Fri
   4: [1, 2, 4, 6], // Mon/Tue/Thu/Sat
   5: [1, 2, 4, 5, 6], // Mon/Tue/Thu/Fri/Sat

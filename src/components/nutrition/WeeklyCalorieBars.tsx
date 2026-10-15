@@ -67,9 +67,32 @@ export function WeeklyCalorieBars({
           if (!hasLogged) {
             barColor = colors.track;
           } else if (isCut) {
-            barColor = cal <= targetCalories ? colors.primaryLight : colors.warning;
+            const overPct = (cal - targetCalories) / targetCalories;
+            if (cal <= targetCalories) {
+              barColor = colors.success;
+            } else if (overPct <= 0.15) {
+              barColor = colors.warning;
+            } else {
+              barColor = colors.error;
+            }
           } else if (isBulk) {
-            barColor = cal >= targetCalories ? colors.success : colors.amber;
+            const underPct = (targetCalories - cal) / targetCalories;
+            if (cal >= targetCalories) {
+              barColor = colors.success;
+            } else if (underPct <= 0.15) {
+              barColor = colors.warning;
+            } else {
+              barColor = colors.error;
+            }
+          } else {
+            const diff = Math.abs(cal - targetCalories) / targetCalories;
+            if (diff <= 0.05) {
+              barColor = colors.success;
+            } else if (diff <= 0.15) {
+              barColor = colors.warning;
+            } else {
+              barColor = colors.error;
+            }
           }
 
           return (

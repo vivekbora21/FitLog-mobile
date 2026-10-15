@@ -452,6 +452,14 @@ export interface PersonalRecord {
   reps: number;
   estimated_one_rep_max: number;
   achieved_at: string;
+  is_improved: boolean;
+  improvement_count: number;
+}
+
+export interface PrTrendPoint {
+  date: string;
+  estimated_one_rep_max: number;
+  weight_kg: number;
 }
 
 export interface ProgressPhoto {
@@ -563,6 +571,7 @@ export interface CalendarDayInfo {
 
 export interface DashboardStats {
   streak_days: number;
+  account_age_days: number;
   workouts_this_week: number;
   workouts_this_month: number;
   weekly_workouts_target?: number;
@@ -905,6 +914,17 @@ export interface TrainingSplit {
   workout_templates: Record<string, BlueprintWorkoutExercise[]>;
   is_active: boolean;
   display_order: number;
+  experience_levels: PlanExperience[];
+  compatible_goals: JourneyMode[];
+  rest_days: number[];
+  muscle_groups: string[];
+  equipment_requirements: PlanEquipmentLevel[];
+  estimated_session_minutes: number;
+  weekly_volume: Record<string, unknown>;
+  progression_strategy: string;
+  recovery_rules: string[];
+  approval_status: 'DRAFT' | 'APPROVED' | 'INACTIVE';
+  catalog_version: string;
 }
 
 export interface PlanPreviewPayload {

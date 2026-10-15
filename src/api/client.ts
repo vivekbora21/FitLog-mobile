@@ -25,6 +25,7 @@ import type {
   UserProfile,
   WeightEntry,
   PersonalRecord,
+  PrTrendPoint,
   BodyMeasurement,
   Exercise,
   MuscleGroup,
@@ -179,6 +180,19 @@ export class ApiError extends Error {
   }
 }
 
+// Reduces a DRF-style error value (string, ErrorDetail-ish object, or
+// arbitrarily nested array/object of them) to a single display string.
+function flattenError(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? flattenError(value[0]) : '';
+  }
+  if (value && typeof value === 'object') {
+    const values = Object.values(value as Record<string, unknown>);
+    return values.length > 0 ? flattenError(values[0]) : '';
+  }
+  return value == null ? '' : String(value);
+}
+
 export function extractErrorMessage(err: any): string {
   if (!err) return 'An unexpected error occurred. Please try again.';
   if (typeof err === 'string') return err;
@@ -187,16 +201,13 @@ export function extractErrorMessage(err: any): string {
     if (err.status >= 500) return 'Something went wrong on our side. Please try again shortly.';
   }
   if (err.data) {
-    if (typeof err.data.detail === 'string') return err.data.detail;
-    if (typeof err.data.message === 'string') return err.data.message;
-    if (typeof err.data.non_field_errors === 'object' && err.data.non_field_errors[0]) {
-      return String(err.data.non_field_errors[0]);
-    }
+    if (err.data.detail) return flattenError(err.data.detail);
+    if (err.data.message) return flattenError(err.data.message);
+    if (err.data.non_field_errors) return flattenError(err.data.non_field_errors);
     const firstKey = Object.keys(err.data)[0];
     if (firstKey) {
-      const val = err.data[firstKey];
-      if (Array.isArray(val) && val[0]) return `${firstKey}: ${val[0]}`;
-      if (typeof val === 'string') return `${firstKey}: ${val}`;
+      const message = flattenError(err.data[firstKey]);
+      if (message) return `${firstKey}: ${message}`;
     }
   }
   if (err.message) return err.message;
@@ -491,6 +502,23 @@ class ApiClient {
     await clearTokens();
   }
 
+  // Returns the raw PDF bytes of the user's data export. Bypasses the generic
+  // request() helper, which always parses JSON.
+  async exportUserDataPdf(): Promise<Uint8Array> {
+    const token = await getAccessToken();
+    const response = await fetch(`${this.baseUrl}/auth/export-data/`, {
+      headers: {
+        Accept: 'application/pdf',
+        'X-API-Version': '1',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new ApiError(`Export failed: ${response.status}`, response.status);
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
   // Analytics & Dashboard
   async getDashboardStats(): Promise<DashboardStats> {
     return this.get<DashboardStats>('/analytics/dashboard/');
@@ -594,8 +622,11 @@ class ApiClient {
     return this.get<{ blueprints: Blueprint[] }>('/plans/blueprints/');
   }
 
-  async getTrainingSplits(): Promise<{ splits: TrainingSplit[] }> {
-    return this.get<{ splits: TrainingSplit[] }>('/plans/splits/');
+  async getTrainingSplits(params?: { daysPerWeek?: number; equipment?: string }): Promise<{ splits: TrainingSplit[] }> {
+    const query = new URLSearchParams();
+    if (params?.daysPerWeek) query.set('days_per_week', String(params.daysPerWeek));
+    if (params?.equipment) query.set('equipment_level', params.equipment);
+    return this.get<{ splits: TrainingSplit[] }>(`/plans/splits/${query.toString() ? `?${query}` : ''}`);
   }
 
   // Spec v1.6 section 11.3 V-21: a 200 response here can be either a full
@@ -609,8 +640,22 @@ class ApiClient {
     return this.post<CreatePlanResponse>('/plans/', payload);
   }
 
+  async recommendGoalWeight(payload: {
+    mode: JourneyMode;
+    current_weight_kg: number;
+    height_cm: number;
+    duration_days: number;
+  }): Promise<{ goal_weight_kg: number }> {
+    return this.post<{ goal_weight_kg: number }>('/plans/recommended-goal-weight/', payload);
+  }
+
   async getWorkoutSessions(): Promise<WorkoutSession[]> {
     return unwrapList(await this.get('/workouts/sessions/'));
+  }
+
+  // Full session history (all pages), for client-side volume-trend charting.
+  async getAllWorkoutSessions(): Promise<WorkoutSession[]> {
+    return this.getAllPages<WorkoutSession>('/workouts/sessions/');
   }
 
   async getCalorieBurnHistory(days: number = 30): Promise<CalorieBurnHistoryResponse> {
@@ -831,6 +876,13 @@ class ApiClient {
 
   async getPersonalRecords(): Promise<PersonalRecord[]> {
     return unwrapList(await this.get('/progress/prs/'));
+  }
+
+  async getPersonalRecordTrend(exerciseId: string): Promise<PrTrendPoint[]> {
+    const res = await this.get<{ exercise_id: string; trend: PrTrendPoint[] }>('/progress/pr-trend/', {
+      exercise_id: exerciseId,
+    });
+    return res.trend;
   }
 
   async logPersonalRecord(data: {

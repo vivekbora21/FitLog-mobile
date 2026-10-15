@@ -190,6 +190,12 @@ export function calculateAge(dobStr?: string | null): number | null {
   return age >= 0 && age < 130 ? age : null;
 }
 
+/** Backs a manually-entered age into an approximate YYYY-MM-DD birth date (Jan 1 of the
+ * implied birth year), for persisting to a profile that only stores `date_of_birth`. */
+export function dateOfBirthFromAge(ageYears: number): string {
+  return `${new Date().getFullYear() - ageYears}-01-01`;
+}
+
 /** Formats YYYY-MM-DD into "15 May 1998" */
 export function formatDobDisplay(dobStr?: string | null): string {
   if (!dobStr || !isValidDateKey(dobStr)) return '--';

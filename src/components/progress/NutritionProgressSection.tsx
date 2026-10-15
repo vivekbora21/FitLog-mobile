@@ -242,6 +242,14 @@ export function NutritionProgressSection({
   }, [weeks, weights]);
 
   // Macro distribution for current week
+  const colorByTarget = useMemo((): 'under' | 'over' | 'center' | false => {
+    if (metric !== 'calories') return false;
+    const mode = nutritionHistory?.plan?.mode;
+    if (mode === 'CUT') return 'under';
+    if (mode === 'BULK') return 'over';
+    return 'center';
+  }, [metric, nutritionHistory?.plan?.mode]);
+
   const currentRatio = useMemo(() => {
     if (!currentWeek) return { proteinPct: 30, carbsPct: 45, fatPct: 25 };
     return calculateMacroRatio(currentWeek.avg_protein, currentWeek.avg_carbs, currentWeek.avg_fat);
@@ -476,6 +484,7 @@ export function NutritionProgressSection({
                   color={colors[metricConfig.colorKey]}
                   targetValue={metricTarget}
                   targetLabel="Target"
+                  colorByTarget={colorByTarget}
                   unit={metric === 'calories' ? '' : 'g'}
                   height={170}
                   formatValue={metricConfig.formatLabel}
@@ -551,6 +560,7 @@ export function NutritionProgressSection({
               color={colors[metricConfig.colorKey]}
               targetValue={metricTarget}
               targetLabel="Target"
+              colorByTarget={colorByTarget}
               unit={metric === 'calories' ? '' : 'g'}
               height={150}
               formatValue={metricConfig.formatLabel}

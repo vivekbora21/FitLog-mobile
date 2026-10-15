@@ -20,11 +20,8 @@ interface TrainingStyleStepProps {
 
 const equipmentLabel = (level: string) => EQUIPMENT_OPTIONS.find((o) => o.value === level)?.label ?? level;
 
-/** Step 4 "Training style" (spec v1.6 section 8.4). Defect #5: only splits
- * that match the chosen days per week are ever offered -- `splits` is
- * filtered by `state.daysPerWeek` before this component ever sees it (see
- * the orchestrator), so there is no "Bro 5x" card showing up against a
- * 4-day plan. */
+/** Step 4 "Training style". The list comes from the server's approved
+ * catalog and is already filtered by frequency and equipment. */
 export function TrainingStyleStep({
   state,
   onChange,
@@ -101,6 +98,7 @@ export function TrainingStyleStep({
                 <Badge label={`Recommended for ${state.daysPerWeek} days/week`} tone="emerald" />
               </View>
               <Text style={styles.desc}>{recommended.description}</Text>
+              <Text style={styles.meta}>{recommended.estimated_session_minutes} min · {recommended.experience_levels.join(', ').toLowerCase()} · {recommended.muscle_groups.slice(0, 4).join(', ')}</Text>
             </PressableScale>
           ) : (
             <Text style={styles.emptyText}>No training split is available for {state.daysPerWeek} days/week yet.</Text>
@@ -130,6 +128,7 @@ export function TrainingStyleStep({
                       </View>
                     </View>
                     <Text style={styles.desc}>{split.description}</Text>
+                    <Text style={styles.meta}>{split.estimated_session_minutes} min · {split.experience_levels.join(', ').toLowerCase()}</Text>
                   </PressableScale>
                 );
               })}
@@ -205,6 +204,12 @@ const useStyles = makeStyles(({ colors }) => ({
     color: colors.textSecondary,
     marginTop: 4,
     lineHeight: 18,
+  },
+  meta: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 8,
+    lineHeight: 17,
   },
   emptyText: {
     fontSize: 13,

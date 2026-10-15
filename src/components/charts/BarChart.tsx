@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import Svg, { Line, Text as SvgText } from 'react-native-svg';
 import { PressableScale } from '../ui/PressableScale';
@@ -32,6 +32,13 @@ export interface BarChartProps {
   signed?: boolean;
   targetValue?: number | null;
   targetLabel?: string;
+  /**
+   * When true and targetValue is set, bars are colored green/amber/red based on
+   * how far they deviate from the target. "under" means under-target is good
+   * (cut mode), "over" means over-target is good (bulk mode), "center" means
+   * close to target is good (maintenance). Defaults to false (single color).
+   */
+  colorByTarget?: 'under' | 'over' | 'center' | false;
   onBarPress?: (datum: BarChartDatum, index: number) => void;
   emptyState?: { icon: React.ReactNode; title: string; subtitle: string };
   accessibilityLabel?: string;
@@ -57,6 +64,7 @@ export function BarChart({
   signed = false,
   targetValue = null,
   targetLabel = 'Target',
+  colorByTarget = false,
   onBarPress,
   emptyState,
   accessibilityLabel,
@@ -68,6 +76,29 @@ export function BarChart({
 
   const barColor = color ?? colors.rose;
   const barInactiveColor = inactiveColor ?? colors.borderSubtle;
+
+  const targetColor = useCallback(
+    (value: number): string => {
+      if (!colorByTarget || targetValue == null || targetValue === 0) return barColor;
+      const pct = (value - targetValue) / targetValue;
+      if (colorByTarget === 'under') {
+        if (pct <= 0) return colors.success;
+        if (pct <= 0.15) return colors.warning;
+        return colors.error;
+      }
+      if (colorByTarget === 'over') {
+        if (pct >= 0) return colors.success;
+        if (pct >= -0.15) return colors.warning;
+        return colors.error;
+      }
+      // center
+      const absPct = Math.abs(pct);
+      if (absPct <= 0.05) return colors.success;
+      if (absPct <= 0.15) return colors.warning;
+      return colors.error;
+    },
+    [colorByTarget, targetValue, barColor, colors.success, colors.warning, colors.error]
+  );
   const fmt = (v: number) => `${signed && v > 0 ? '+' : ''}${formatValue(v)}`;
 
   useEffect(() => {
@@ -209,7 +240,7 @@ export function BarChart({
                       top: barTop,
                       height: barH,
                       width: Math.min(28, Math.max(4, colW * 0.62)),
-                      backgroundColor: isActive ? d.color ?? barColor : barInactiveColor,
+                      backgroundColor: isActive ? d.color ?? (colorByTarget ? targetColor(d.value) : barColor) : barInactiveColor,
                       opacity: dimmed ? 0.35 : 1,
                     },
                   ]}

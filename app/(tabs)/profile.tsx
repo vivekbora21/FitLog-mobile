@@ -24,7 +24,10 @@ import {
   Trash2,
   User as UserIcon,
   RefreshCw,
+  Download,
 } from 'lucide-react-native';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/api/client';
 import { useAuth } from '../../src/providers/auth';
@@ -49,6 +52,7 @@ export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [queueCounts, setQueueCounts] = useState({ pending: 0, failed: 0 });
+  const [isExporting, setIsExporting] = useState(false);
   useFocusEffect(
     useCallback(() => {
       setQueueCounts({ pending: getPendingCount(), failed: getFailedCount() });
@@ -60,6 +64,32 @@ export default function ProfileScreen() {
     if (value === preference) return;
     haptics.selection();
     setPreference(value);
+  };
+
+  const handleExportData = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    haptics.selection();
+    try {
+      const bytes = await api.exportUserDataPdf();
+      const file = new File(Paths.cache, `fitlog-export-${Date.now()}.pdf`);
+      file.create({ overwrite: true });
+      file.write(bytes);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(file.uri, {
+          mimeType: 'application/pdf',
+          UTI: 'com.adobe.pdf',
+          dialogTitle: 'Export your FitLog data',
+        });
+      } else {
+        Alert.alert('Export ready', `Your data was saved to ${file.uri}`);
+      }
+    } catch {
+      Alert.alert('Export failed', 'Could not export your data. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleLogout = () => {
@@ -302,6 +332,14 @@ export default function ProfileScreen() {
               iconTint={colors.cyanGlow}
               title="Change password"
               onPress={() => router.push('/account/password')}
+              right={<ChevronRight size={18} color={colors.textMuted} />}
+            />
+            <SettingsRow
+              icon={<Download size={18} color={colors.primaryLight} />}
+              iconTint={colors.primarySurface}
+              title="Export data"
+              subtitle={isExporting ? 'Preparing your export…' : 'Download a copy of your FitLog data'}
+              onPress={handleExportData}
               right={<ChevronRight size={18} color={colors.textMuted} />}
             />
             <SettingsRow

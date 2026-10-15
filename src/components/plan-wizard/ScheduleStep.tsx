@@ -1,16 +1,12 @@
 import React from 'react';
 import { View, Text } from 'react-native';
-import { ChipGroup, Input, PressableScale } from '../ui';
+import { ChipGroup, PressableScale } from '../ui';
 import { radius, spacing, makeStyles } from '../../theme';
-import { parseNumberInput } from '../../lib/format';
 import { isNoSupportedSplitResult, type PlanPreviewResult } from '../../types';
 import {
   DAYS_PER_WEEK_OPTIONS,
-  DURATION_PRESETS,
   EQUIPMENT_OPTIONS,
   EXPERIENCE_OPTIONS,
-  MAX_PLAN_DAYS,
-  MIN_PLAN_DAYS,
   WEEKDAY_OPTIONS,
 } from './constants';
 import { infoMessages, messageText, warnMessages } from './messageCopy';
@@ -44,18 +40,11 @@ function adjustWeekdaysForCount(current: number[], newCount: number): number[] {
   return result.sort((a, b) => a - b);
 }
 
-type DurationChipValue = number | 'custom';
-
-/** Step 3 "Your schedule" (spec v1.6 section 8.3). Defect #4: days-per-week
- * and plan length each have exactly one control here -- no duplicate chip +
- * free-text pair, and no second days-per-week picker inside a split step. */
+/** Step 3 "Your schedule" (spec v1.6 section 8.3). Weekly training days and
+ * setup live here; plan length is selected on the preceding About You step to
+ * match the website's details flow. */
 export function ScheduleStep({ state, onChange, preview }: ScheduleStepProps) {
   const styles = useStyles();
-
-  const durationNum = parseNumberInput(state.durationDays);
-  const isPreset = durationNum != null && DURATION_PRESETS.some((d) => d.value === durationNum);
-  const [forceCustom, setForceCustom] = React.useState(!isPreset);
-  const showCustomInput = forceCustom || !isPreset;
 
   const onDaysPerWeekChange = (n: number) => {
     onChange({ daysPerWeek: n, weekdays: adjustWeekdaysForCount(state.weekdays, n) });
@@ -76,7 +65,7 @@ export function ScheduleStep({ state, onChange, preview }: ScheduleStepProps) {
   return (
     <View>
       <Text style={styles.heading}>Your schedule</Text>
-      <Text style={styles.body}>How many days you train, which days, and how long the plan runs.</Text>
+      <Text style={styles.body}>How many days you train and which days fit your routine.</Text>
 
       <ChipGroup
         label="Days per week"
@@ -117,28 +106,6 @@ export function ScheduleStep({ state, onChange, preview }: ScheduleStepProps) {
           <Text style={styles.warnText}>{messageText(m)}</Text>
         </View>
       ))}
-
-      <Text style={styles.label}>Plan length</Text>
-      <ChipGroup<DurationChipValue>
-        options={[...DURATION_PRESETS, { value: 'custom', label: 'Custom' }]}
-        value={showCustomInput ? 'custom' : (durationNum as number)}
-        onChange={(v) => {
-          if (v === 'custom') {
-            setForceCustom(true);
-            return;
-          }
-          setForceCustom(false);
-          onChange({ durationDays: String(v), durationEdited: true });
-        }}
-      />
-      {showCustomInput ? (
-        <Input
-          label={`Custom length (${MIN_PLAN_DAYS}–${MAX_PLAN_DAYS} days)`}
-          keyboardType="number-pad"
-          value={state.durationDays}
-          onChangeText={(v) => onChange({ durationDays: v, durationEdited: true })}
-        />
-      ) : null}
 
       <Text style={styles.sectionLabel}>Your setup</Text>
       <ChipGroup

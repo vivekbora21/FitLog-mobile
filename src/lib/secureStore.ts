@@ -10,8 +10,13 @@ const memoryStore: Record<string, string> = {};
 export async function getAccessToken(): Promise<string | null> {
   try {
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        return window.sessionStorage.getItem(ACCESS_TOKEN_KEY);
+      if (typeof window !== 'undefined') {
+        return (
+          window.localStorage?.getItem(ACCESS_TOKEN_KEY) ||
+          window.sessionStorage?.getItem(ACCESS_TOKEN_KEY) ||
+          memoryStore[ACCESS_TOKEN_KEY] ||
+          null
+        );
       }
       return memoryStore[ACCESS_TOKEN_KEY] || null;
     }
@@ -25,8 +30,9 @@ export async function getAccessToken(): Promise<string | null> {
 export async function setAccessToken(token: string): Promise<void> {
   try {
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
+      if (typeof window !== 'undefined') {
+        window.localStorage?.setItem(ACCESS_TOKEN_KEY, token);
+        window.sessionStorage?.setItem(ACCESS_TOKEN_KEY, token);
       }
       memoryStore[ACCESS_TOKEN_KEY] = token;
       return;
@@ -40,8 +46,13 @@ export async function setAccessToken(token: string): Promise<void> {
 export async function getRefreshToken(): Promise<string | null> {
   try {
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        return window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
+      if (typeof window !== 'undefined') {
+        return (
+          window.localStorage?.getItem(REFRESH_TOKEN_KEY) ||
+          window.sessionStorage?.getItem(REFRESH_TOKEN_KEY) ||
+          memoryStore[REFRESH_TOKEN_KEY] ||
+          null
+        );
       }
       return memoryStore[REFRESH_TOKEN_KEY] || null;
     }
@@ -55,8 +66,9 @@ export async function getRefreshToken(): Promise<string | null> {
 export async function setRefreshToken(token: string): Promise<void> {
   try {
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.setItem(REFRESH_TOKEN_KEY, token);
+      if (typeof window !== 'undefined') {
+        window.localStorage?.setItem(REFRESH_TOKEN_KEY, token);
+        window.sessionStorage?.setItem(REFRESH_TOKEN_KEY, token);
       }
       memoryStore[REFRESH_TOKEN_KEY] = token;
       return;
@@ -74,9 +86,11 @@ export async function saveTokens(access: string, refresh: string): Promise<void>
 export async function clearTokens(): Promise<void> {
   try {
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.removeItem(ACCESS_TOKEN_KEY);
-        window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      if (typeof window !== 'undefined') {
+        window.localStorage?.removeItem(ACCESS_TOKEN_KEY);
+        window.localStorage?.removeItem(REFRESH_TOKEN_KEY);
+        window.sessionStorage?.removeItem(ACCESS_TOKEN_KEY);
+        window.sessionStorage?.removeItem(REFRESH_TOKEN_KEY);
       }
       delete memoryStore[ACCESS_TOKEN_KEY];
       delete memoryStore[REFRESH_TOKEN_KEY];

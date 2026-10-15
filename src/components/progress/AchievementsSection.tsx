@@ -24,6 +24,10 @@ interface Track {
   icon: React.ComponentType<{ size: number; color: string; strokeWidth?: number }>;
   color: string;
   tiers: Tier[];
+  // Day-based tracks (streaks, active days) are capped to how long the account has
+  // actually existed, so a tier can't be unlocked by backdating logged entries —
+  // it can only be earned over real elapsed time.
+  capByAccountAge?: boolean;
 }
 
 function currentTierIndex(value: number, tiers: Tier[]): number {
@@ -34,16 +38,17 @@ function currentTierIndex(value: number, tiers: Tier[]): number {
   return idx;
 }
 
-function AchievementTrack({ track }: { track: Track }) {
+function AchievementTrack({ track, accountAgeDays }: { track: Track; accountAgeDays: number }) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const earnedIdx = currentTierIndex(track.value, track.tiers);
+  const eligibleValue = track.capByAccountAge ? Math.min(track.value, accountAgeDays) : track.value;
+  const earnedIdx = currentTierIndex(eligibleValue, track.tiers);
   const nextTier = track.tiers[earnedIdx + 1];
   const prevThreshold = earnedIdx >= 0 ? track.tiers[earnedIdx].threshold : 0;
   const progressPct = nextTier
     ? Math.min(
         100,
-        Math.round(((track.value - prevThreshold) / (nextTier.threshold - prevThreshold)) * 100)
+        Math.round(((eligibleValue - prevThreshold) / (nextTier.threshold - prevThreshold)) * 100)
       )
     : 100;
   const Icon = track.icon;
@@ -93,7 +98,7 @@ function AchievementTrack({ track }: { track: Track }) {
           <>
             <ProgressBar percentage={progressPct} color={track.color} />
             <Text style={styles.progressText}>
-              {Math.max(0, nextTier.threshold - track.value)} {track.unit} to {nextTier.name}
+              {Math.max(0, nextTier.threshold - eligibleValue)} {track.unit} to {nextTier.name}
             </Text>
           </>
         ) : (
@@ -134,6 +139,15 @@ export function AchievementsSection({
     return computeLoggingStreak((dateKey) => !!byDate.get(dateKey)?.has_logged);
   }, [nutritionHistory]);
 
+  // Only sets that actually beat a previous best count — the first time an exercise
+  // is ever logged just records a baseline, so it shouldn't unlock a tier on its own.
+  const genuinePrCount = useMemo(
+    () => prs.reduce((sum, pr) => sum + (pr.is_improved ? pr.improvement_count : 0), 0),
+    [prs]
+  );
+
+  const accountAgeDays = dashboardStats?.account_age_days ?? 0;
+
   const tracks: Track[] = [
     {
       id: 'streak',
@@ -143,6 +157,7 @@ export function AchievementsSection({
       unit: 'days',
       icon: Flame,
       color: colors.amber,
+      capByAccountAge: true,
       tiers: [
         { threshold: 3, name: 'Spark' },
         { threshold: 7, name: 'Lit' },
@@ -154,7 +169,7 @@ export function AchievementsSection({
       id: 'prs',
       title: 'Personal Records',
       sub: 'Lifts you\'ve beaten your own best on',
-      value: prs.length,
+      value: genuinePrCount,
       unit: 'PRs',
       icon: Trophy,
       color: colors.primaryLight,
@@ -173,6 +188,7 @@ export function AchievementsSection({
       unit: 'days',
       icon: Dumbbell,
       color: colors.violet,
+      capByAccountAge: true,
       tiers: [
         { threshold: 5, name: 'Starter' },
         { threshold: 15, name: 'Regular' },
@@ -188,6 +204,7 @@ export function AchievementsSection({
       unit: 'days',
       icon: Utensils,
       color: colors.cyan,
+      capByAccountAge: true,
       tiers: [
         { threshold: 3, name: 'Tracking' },
         { threshold: 7, name: 'Dialed In' },
@@ -197,11 +214,12 @@ export function AchievementsSection({
     },
   ];
 
-  const valuesSignature = tracks.map((t) => t.value).join(',');
+  const valuesSignature = tracks.map((t) => t.value).join(',') + `|${accountAgeDays}`;
   const earnedKeys = useMemo(
     () =>
       tracks.flatMap((track) => {
-        const earnedIdx = currentTierIndex(track.value, track.tiers);
+        const eligibleValue = track.capByAccountAge ? Math.min(track.value, accountAgeDays) : track.value;
+        const earnedIdx = currentTierIndex(eligibleValue, track.tiers);
         return track.tiers.slice(0, earnedIdx + 1).map((tier) => `${track.id}:${tier.name}`);
       }),
     // `tracks` is rebuilt every render; valuesSignature is the real identity to key on.
@@ -246,7 +264,7 @@ export function AchievementsSection({
     <View style={styles.container}>
       {tracks.map((track, i) => (
         <Animated.View key={track.id} entering={FadeInDown.delay(50 + i * 60).duration(360)}>
-          <AchievementTrack track={track} />
+          <AchievementTrack track={track} accountAgeDays={accountAgeDays} />
         </Animated.View>
       ))}
     </View>

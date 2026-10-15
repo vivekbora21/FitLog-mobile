@@ -1403,8 +1403,136 @@ function PrsSection({
       .map(([muscle, count]) => ({ key: muscle, label: muscle, value: count }));
   }, [prs]);
 
+  // Strength progression: estimated-1RM growth over time for a selected exercise.
+  const exerciseOptions = useMemo(() => {
+    const seen = new Map<string, { value: string; label: string; est: number }>();
+    for (const pr of prs) {
+      if (!seen.has(pr.exercise)) {
+        seen.set(pr.exercise, {
+          value: pr.exercise,
+          label: pr.exercise_name,
+          est: pr.estimated_one_rep_max || pr.max_weight_kg,
+        });
+      }
+    }
+    return [...seen.values()].sort((a, b) => b.est - a.est).map(({ value, label }) => ({ value, label }));
+  }, [prs]);
+
+  const [trendExerciseId, setTrendExerciseId] = useState<string | null>(null);
+  const activeExerciseId = trendExerciseId ?? exerciseOptions[0]?.value ?? null;
+  const activeExerciseLabel = exerciseOptions.find((o) => o.value === activeExerciseId)?.label ?? '';
+
+  const { data: prTrend = [] } = useQuery({
+    queryKey: ['prTrend', activeExerciseId],
+    queryFn: () => api.getPersonalRecordTrend(activeExerciseId as string),
+    enabled: !!activeExerciseId,
+  });
+
+  const trendChartData = useMemo(
+    () => prTrend.map((p) => ({ value: p.estimated_one_rep_max, date: p.date })),
+    [prTrend]
+  );
+
+  // Training volume growth: total kg lifted per session, over time.
+  const [volumePeriod, setVolumePeriod] = useState<TimeframeScope>('3M');
+  const { data: allSessions = [] } = useQuery({
+    queryKey: ['allWorkoutSessions'],
+    queryFn: () => api.getAllWorkoutSessions(),
+  });
+
+  const volumeChartData = useMemo(() => {
+    const chrono = [...allSessions]
+      .filter((s) => s.started_at)
+      .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+    if (chrono.length === 0 || volumePeriod === 'ALL') {
+      return chrono.map((s) => ({ value: Math.round(s.total_volume_kg || 0), date: s.started_at }));
+    }
+    const daysMap: Record<TimeframeScope, number> = { '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365, ALL: 99999 };
+    const now = new Date();
+    const cutoffTime = now.getTime() - daysMap[volumePeriod] * 24 * 60 * 60 * 1000;
+    const filtered = chrono.filter((s) => new Date(s.started_at).getTime() >= cutoffTime);
+    return (filtered.length > 0 ? filtered : chrono).map((s) => ({
+      value: Math.round(s.total_volume_kg || 0),
+      date: s.started_at,
+    }));
+  }, [allSessions, volumePeriod]);
+
   return (
     <View style={styles.sectionWrap}>
+      {/* Strength Progression Chart */}
+      {exerciseOptions.length > 0 && (
+        <Animated.View entering={enter(0)}>
+          <Card elevated style={styles.chartCard}>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.cardEyebrow}>Strength Progression</Text>
+                <Text style={styles.cardTitle}>{activeExerciseLabel} — Est. 1RM</Text>
+              </View>
+              <Badge label={`${trendChartData.length} log${trendChartData.length === 1 ? '' : 's'}`} tone="emerald" />
+            </View>
+
+            <View style={styles.periodFilterWrap}>
+              <PeriodFilter
+                options={exerciseOptions}
+                value={activeExerciseId ?? ''}
+                onChange={setTrendExerciseId}
+                size="sm"
+                accessibilityLabel="Exercise for strength progression chart"
+              />
+            </View>
+
+            <LineChart
+              data={trendChartData}
+              color={colors.primaryLight}
+              unit=" kg"
+              emptyState={{
+                icon: <TrendingUp size={24} color={colors.textMuted} />,
+                title: 'Not enough history yet',
+                subtitle: 'Log more sets of this exercise to see your 1RM grow over time.',
+              }}
+              accessibilityLabel={`${activeExerciseLabel} estimated one-rep max trend`}
+            />
+          </Card>
+        </Animated.View>
+      )}
+
+      {/* Training Volume Chart */}
+      {volumeChartData.length > 0 && (
+        <Animated.View entering={enter(1)}>
+          <Card elevated style={styles.chartCard}>
+            <View style={styles.cardHeader}>
+              <View>
+                <Text style={styles.cardEyebrow}>Training Load</Text>
+                <Text style={styles.cardTitle}>Volume Over Time</Text>
+              </View>
+              <Badge label={`${volumeChartData.length} session${volumeChartData.length === 1 ? '' : 's'}`} tone="cyan" />
+            </View>
+
+            <View style={styles.periodFilterWrap}>
+              <PeriodFilter
+                options={WEIGHT_PERIOD_OPTIONS}
+                value={volumePeriod}
+                onChange={setVolumePeriod}
+                size="sm"
+                accessibilityLabel="Training volume chart period"
+              />
+            </View>
+
+            <LineChart
+              data={volumeChartData}
+              color={colors.cyan}
+              unit=" kg"
+              emptyState={{
+                icon: <TrendingUp size={24} color={colors.textMuted} />,
+                title: 'No sessions logged yet',
+                subtitle: 'Complete a workout to start tracking your total volume.',
+              }}
+              accessibilityLabel="Total workout volume trend"
+            />
+          </Card>
+        </Animated.View>
+      )}
+
       {/* Top Lifts Chart */}
       {prs.length > 0 && (
         <Animated.View entering={enter(0)}>

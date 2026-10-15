@@ -7,7 +7,7 @@ import { ChevronLeft, Pencil, Play } from 'lucide-react-native';
 import { ApiError, api, extractErrorMessage } from '../src/api/client';
 import { Button, ProgressBar, SheetScreen } from '../src/components/ui';
 import { spacing, makeStyles, useTheme } from '../src/theme';
-import { calculateAge, parseNumberInput } from '../src/lib/format';
+import { calculateAge, dateOfBirthFromAge, parseNumberInput } from '../src/lib/format';
 import { haptics } from '../src/lib/haptics';
 import { useAuth } from '../src/providers/auth';
 import type { CreatePlanPayload } from '../src/types';
@@ -21,6 +21,7 @@ import {
   ScheduleStep,
   TrainingStyleStep,
   buildPreviewPayload,
+  calculateRecommendedGoalWeight,
   defaultPlanWizardState,
   gateFromQuery,
   usePlanPreview,
@@ -74,7 +75,10 @@ export default function PlanSelectScreen() {
   }, [rawState, profile]);
 
   const blueprintsQuery = useQuery({ queryKey: ['blueprints'], queryFn: () => api.getBlueprints() });
-  const splitsQuery = useQuery({ queryKey: ['trainingSplits'], queryFn: () => api.getTrainingSplits() });
+  const splitsQuery = useQuery({
+    queryKey: ['trainingSplits', state.daysPerWeek, state.equipment],
+    queryFn: () => api.getTrainingSplits({ daysPerWeek: state.daysPerWeek, equipment: state.equipment ?? undefined }),
+  });
 
   // Spec v1.6 section 7.4: one debounced preview query backs the live pace
   // line (About you), the schedule warnings (Your schedule), the split
@@ -106,12 +110,13 @@ export default function PlanSelectScreen() {
   const onChangeMode = (mode: BuilderMode) => {
     setRawState((prev) => {
       const next: PlanWizardState = { ...prev, mode };
+      const duration = !prev.durationEdited ? DEFAULT_DURATION_DAYS_BY_MODE[mode] : (parseNumberInput(prev.durationDays) || 60);
       if (!prev.durationEdited) {
-        next.durationDays = String(DEFAULT_DURATION_DAYS_BY_MODE[mode]);
+        next.durationDays = String(duration);
       }
       if (mode === 'RECOMP') {
         const goal = parseNumberInput(prev.goalWeight);
-        const weight = parseNumberInput(prev.currentWeight);
+        const weight = parseNumberInput(prev.currentWeight) || (profile?.weight_kg != null ? profile.weight_kg : null);
         if (goal != null && weight != null) {
           next.recompDirection = goal < weight - 1 ? 'lean_out' : goal > weight + 1 ? 'lean_gain' : 'maintain';
         } else if (!prev.recompDirection) {
@@ -132,10 +137,32 @@ export default function PlanSelectScreen() {
     return payload;
   };
 
+  // Best-effort: if the profile was missing height/age, persist what the user entered
+  // here so future plans (and the rest of the app) don't need to ask again. Never
+  // blocks or fails plan creation.
+  const syncMissingProfileFields = async () => {
+    const missingHeight = profile?.height_cm == null;
+    const missingDob = !profile?.date_of_birth;
+    if (!missingHeight && !missingDob) return;
+    const heightCm = parseNumberInput(state.height);
+    const age = parseNumberInput(state.age);
+    try {
+      await api.updateMe({
+        profile: {
+          ...(missingHeight && heightCm != null ? { height_cm: heightCm } : {}),
+          ...(missingDob && age != null ? { date_of_birth: dateOfBirthFromAge(age) } : {}),
+        },
+      });
+    } catch {
+      // Profile sync is a convenience, not a requirement for starting the plan.
+    }
+  };
+
   const startMutation = useMutation({
     mutationFn: () => api.createPlan(buildSavePayload() as CreatePlanPayload),
     onSuccess: async () => {
       haptics.success();
+      await syncMissingProfileFields();
       await Promise.all([queryClient.invalidateQueries(), refreshUser()]);
       safeBack();
     },
@@ -300,7 +327,14 @@ export default function PlanSelectScreen() {
 
       {step === 1 ? (
         <Animated.View key="step-1" entering={FadeInRight.duration(300).springify().damping(15)}>
-          <AboutYouStep state={state} onChange={patch} preview={preview} onExtendDuration={onExtendDuration} />
+          <AboutYouStep
+            state={state}
+            onChange={patch}
+            preview={preview}
+            onExtendDuration={onExtendDuration}
+            heightMissingFromProfile={profile?.height_cm == null}
+            ageMissingFromProfile={!profile?.date_of_birth}
+          />
         </Animated.View>
       ) : null}
 

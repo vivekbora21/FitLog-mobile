@@ -63,7 +63,7 @@ export const MODE_CARD_BY_MODE: Record<BuilderMode, ModeCardMeta> = MODE_CARDS.r
 );
 
 export const DURATION_PRESETS = [21, 30, 60, 90].map((d) => ({ value: d, label: `${d}d` }));
-export const DAYS_PER_WEEK_OPTIONS = [3, 4, 5, 6].map((n) => ({ value: n, label: `${n}×` }));
+export const DAYS_PER_WEEK_OPTIONS = [2, 3, 4, 5, 6].map((n) => ({ value: n, label: `${n}×` }));
 
 export const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
   { value: 1, label: 'Mon' },
@@ -102,3 +102,38 @@ export const EQUIPMENT_OPTIONS: { value: PlanEquipmentLevel; label: string }[] =
 // workouts.plan_engine.config.MIN_AGE for inline UI feedback; the server's
 // V-01 PROFILE_OUT_OF_RANGE is still the enforced rule.
 export const MIN_BUILDER_AGE = 18;
+
+/**
+ * Calculates a sensible, safe goal weight reachable over the given duration
+ * at the mode's recommended pace, matching the backend's recommend_goal_weight.
+ * - CUT: -0.75 kg/week
+ * - BULK: +0.75 kg/week
+ * - RECOMP: -0.35 kg/week
+ * - FOCUS / HABIT: 0 kg delta
+ */
+export function calculateRecommendedGoalWeight(
+  mode: BuilderMode | 'CUT' | 'BULK' | 'RECOMP' | 'FOCUS' | 'HABIT' | null,
+  currentWeightKg: number,
+  heightCm: number,
+  durationDays: number
+): number {
+  if (!mode || !currentWeightKg || currentWeightKg <= 0) return currentWeightKg;
+  const days = durationDays > 0 ? durationDays : 60;
+  const weeks = days / 7;
+
+  let weeklyRate = 0;
+  if (mode === 'CUT') {
+    weeklyRate = -0.75;
+  } else if (mode === 'BULK') {
+    weeklyRate = 0.75;
+  } else if (mode === 'RECOMP') {
+    weeklyRate = -0.35;
+  } else {
+    weeklyRate = 0;
+  }
+
+  const change = Math.min(Math.abs(weeklyRate * weeks), currentWeightKg * 0.1);
+  const result = currentWeightKg + (weeklyRate < 0 ? -change : weeklyRate > 0 ? change : 0);
+  const bmiFloor = heightCm > 0 ? 18.5 * (heightCm / 100) ** 2 : 0;
+  return Math.round((weeklyRate < 0 ? Math.max(result, bmiFloor) : result) * 10) / 10;
+}
