@@ -275,11 +275,20 @@ export default function LogWorkoutScreen() {
         : planQuery.data?.days?.find(
             (d) => d.routine === params.routineId || d.routine_details?.id === params.routineId
           );
-      if (matchDay?.routine_details) {
-        setPrefilled(true);
-        setTitle(matchDay.routine_details.name || matchDay.label || 'Workout');
-        setExercises((matchDay.routine_details.exercises ?? []).map(exerciseFromRoutine));
-        setRoutineId(matchDay.routine_details.id);
+      if (matchDay) {
+        const rawWp: any = matchDay.workout_payload;
+        const payloadExs = Array.isArray(rawWp) ? rawWp : (Array.isArray(rawWp?.exercises) ? rawWp.exercises : []);
+        const relExs = matchDay.routine_details?.exercises ?? [];
+        const chosenExs = relExs.length > 0 ? relExs : payloadExs;
+
+        if (chosenExs.length > 0 || matchDay.routine_details) {
+          setPrefilled(true);
+          setTitle(matchDay.routine_details?.name || rawWp?.name || matchDay.label || 'Workout');
+          setExercises(chosenExs.map(exerciseFromRoutine));
+          setRoutineId(matchDay.routine_details?.id || matchDay.routine || null);
+        } else {
+          setPrefilled(true);
+        }
       } else if (routine && (routine.id === params.routineId || planDay?.routine === params.routineId)) {
         setPrefilled(true);
         setTitle(routine.name || planDay?.label || 'Workout');
@@ -288,10 +297,14 @@ export default function LogWorkoutScreen() {
       } else {
         setPrefilled(true);
       }
-    } else if (usePlan && routine) {
+    } else if (usePlan && (routine || (planDay as any)?.workout_payload)) {
       setPrefilled(true);
-      setTitle(routine.name || planDay?.label || 'Workout');
-      setExercises((routine.exercises ?? []).map(exerciseFromRoutine));
+      const rawWp: any = (planDay as any)?.workout_payload;
+      const payloadExs = Array.isArray(rawWp) ? rawWp : (Array.isArray(rawWp?.exercises) ? rawWp.exercises : []);
+      const relExs = routine?.exercises ?? [];
+      const chosenExs = relExs.length > 0 ? relExs : payloadExs;
+      setTitle(routine?.name || rawWp?.name || planDay?.label || 'Workout');
+      setExercises(chosenExs.map(exerciseFromRoutine));
       if (planDay?.status !== 'COMPLETED') setRoutineId(planDay?.routine ?? null);
     } else if (session) {
       if (editDraftStatus === 'checking') {

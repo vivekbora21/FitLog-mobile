@@ -110,7 +110,12 @@ export default function PlanScreen() {
   const day = days.find((d) => d.day_number === shownDay);
   const routine = day?.routine_details;
   const exercises = routine?.exercises ?? [];
-  const payloadExercises = exercises.length === 0 ? (day?.workout_payload ?? []) : [];
+  const rawPayload = day?.workout_payload as any;
+  const payloadExercises: any[] = exercises.length === 0
+    ? (Array.isArray(rawPayload)
+        ? rawPayload
+        : (Array.isArray(rawPayload?.exercises) ? rawPayload.exercises : []))
+    : [];
   const completed = days.filter((d) => d.status === 'COMPLETED').length;
   const planState = data?.plan_state;
   const duration = planState?.effective_duration_days ?? program?.duration_days ?? days.length;
@@ -1145,7 +1150,7 @@ export default function PlanScreen() {
                                 <View style={styles.exerciseTitleCol}>
                                   <View style={styles.exerciseNameRow}>
                                     <Text style={styles.exerciseName} numberOfLines={2}>
-                                      {ex.exercise_name || 'Exercise'}
+                                      {ex.exercise_name || ex.name || 'Exercise'}
                                     </Text>
                                     {ex.is_cardio && <Badge label="Cardio" tone="amber" />}
                                   </View>
@@ -1156,11 +1161,11 @@ export default function PlanScreen() {
                             <View style={styles.statGrid}>
                               <View style={styles.statBox}>
                                 <Text style={styles.statBoxLabel}>SETS</Text>
-                                <Text style={styles.statBoxValue}>{ex.sets ?? '--'}</Text>
+                                <Text style={styles.statBoxValue}>{ex.sets ?? ex.target_sets ?? '--'}</Text>
                               </View>
                               <View style={styles.statBox}>
                                 <Text style={styles.statBoxLabel}>REPS</Text>
-                                <Text style={styles.statBoxValue}>{ex.reps ?? '--'}</Text>
+                                <Text style={styles.statBoxValue}>{ex.reps ?? ex.target_reps ?? '--'}</Text>
                               </View>
                               <View style={styles.statBox}>
                                 <Text style={styles.statBoxLabel}>REST</Text>

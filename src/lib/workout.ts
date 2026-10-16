@@ -19,7 +19,27 @@ export interface NormalizedWorkoutDay {
 }
 
 export function normalizeWorkoutDay(day: NormalizedWorkoutDay): NormalizedWorkoutDay {
-  const exercises = day.routine_details?.exercises;
+  let rawExercises = day.routine_details?.exercises;
+  if (!rawExercises || rawExercises.length === 0) {
+    const wp = day.workout_payload;
+    const rawList = Array.isArray(wp) ? wp : wp?.exercises;
+    if (Array.isArray(rawList)) {
+      rawExercises = rawList.map((item: any, idx: number) => ({
+        id: item.id || `payload-${idx}`,
+        exercise: item.exercise || '',
+        exercise_name: item.exercise_name || item.name || `Exercise ${idx + 1}`,
+        target_sets: Number(item.sets || item.target_sets || 3),
+        target_reps: String(item.reps || item.target_reps || '8-12'),
+        rest_seconds: Number(item.rest_seconds || 90),
+        primary_muscle: item.primary_muscle || '',
+        target_rpe: item.rpe ?? 8,
+        suggested_weight_kg: item.suggested_weight_kg ?? null,
+        order: idx,
+        notes: item.notes || item.progression_rule || '',
+      }));
+    }
+  }
+  const exercises = rawExercises;
   const normalizedExercises: RoutineExercise[] = Array.isArray(exercises)
     ? [...exercises]
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
@@ -113,7 +133,7 @@ export function getRoutineExerciseMuscle(ex?: Partial<RoutineExercise> | null): 
  */
 export function getRoutineExerciseId(ex?: Partial<RoutineExercise> | null): string {
   if (!ex) return '';
-  return ex.swap?.exercise || ex.exercise || '';
+  return ex.swap?.exercise || ex.exercise || (ex as any).exercise_id || (ex as any).id || '';
 }
 
 /**

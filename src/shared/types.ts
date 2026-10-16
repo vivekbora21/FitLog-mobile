@@ -281,6 +281,9 @@ export interface NutritionDayResponse {
   targets: MacroTarget;
   yesterday_meals?: MealEntry[];
   plan?: NutritionPlanInfo;
+  macro_summary?: any;
+  macro_breakdown?: any;
+  target_derivation?: any;
 }
 
 export interface NutritionHistoryDay {
@@ -391,6 +394,7 @@ export interface MacroTarget {
   weekly_workouts: number | null;
   /** null = follow the active plan's cardio phase */
   weekly_cardio_minutes: number | null;
+  weekly_calories_burned?: number | null;
   /** Estimated calories burned across the day's logged workout sessions. */
   exercise_calories: number;
 }
@@ -556,6 +560,7 @@ export interface CalendarDayInfo {
   duration_min: number;
   volume_kg: number;
   exercises_count: number;
+  session_id?: string | null;
   notes?: string;
   steps?: number | null;
   sleep_hours?: number | null;
@@ -617,6 +622,7 @@ export interface DashboardStats {
     weekly_weight_change?: number | null;
     current_waist?: number | null;
     starting_waist?: number | null;
+    target_waist?: number | null;
     waist_change?: number | null;
     cardio_minutes?: number;
     cardio_target?: number;
@@ -745,6 +751,7 @@ export interface JourneyPacingData {
   copilot_insight: string;
   starting_waist?: number | null;
   current_waist?: number | null;
+  target_waist?: number | null;
   target_weight?: number | null;
   expected_weight_change?: number | null;
   weekly_workouts_target?: number;
@@ -1219,8 +1226,14 @@ export interface JourneySummary {
   start_waist_cm?: number | null;
   current_waist_cm?: number | null;
   waist_change_cm?: number | null;
+  fat_burned_kg?: number | null;
+  consistency_pct?: number | null;
+  completion_rate_pct?: number | null;
   total_cardio_minutes: number;
   total_cardio_sessions: number;
+  nutrition_status?: any;
+  weekly_frequency?: any[];
+  exercise_stats?: any[];
 }
 
 export interface JourneyNutritionSummary {
@@ -1254,4 +1267,76 @@ export interface StartJourneyPayload {
   blueprint?: string;
   focus_exercise_id?: string | null;
   target_focus_1rm?: number | null;
+}
+
+
+export interface RoutineExerciseSwap {
+  id: string;
+  exercise: string;
+  exercise_name: string;
+  primary_muscle: string;
+}
+
+export interface MacroSummaryItem {
+  consumed: number;
+  target: number;
+  remaining?: number;
+  excess?: number;
+  percentage?: number;
+  is_exceeded?: boolean;
+  calories?: number;
+  pct_of_calories?: number;
+}
+
+export interface MacroSummaryCalculated {
+  calories: MacroSummaryItem;
+  protein: MacroSummaryItem;
+  carbs: MacroSummaryItem;
+  fat: MacroSummaryItem;
+  hydration?: {
+    consumed_ml: number;
+    target_ml: number;
+    consumed_l: number;
+    target_l: number;
+    remaining_ml: number;
+    remaining_l: number;
+    percentage: number;
+  };
+  calorie_budget_intact?: boolean;
+}
+
+export interface BlueprintPhase {
+  name: string;
+  start_day: number;
+  end_day: number;
+}
+
+export interface PlanRequest {
+  blueprint_slug?: string;
+  mode?: JourneyMode;
+  duration_days: number;
+  days_per_week: number;
+  weekdays?: number[];
+  current_weight_kg: number;
+  goal_weight_kg?: number;
+  height_cm: number;
+  age: number;
+  sex: 'MALE' | 'FEMALE';
+  split_slug?: string;
+  equipment_level?: 'full_gym' | 'home_basic' | 'minimal';
+  experience?: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+  activity_level?: string;
+  name?: string;
+}
+
+export interface PlanDayTargets {
+  daily_calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+}
+
+export interface PlanFeasibility {
+  status: 'safe' | 'aggressive' | 'unrealistic';
+  message: string;
 }
